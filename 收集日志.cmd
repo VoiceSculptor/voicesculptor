@@ -1,0 +1,25 @@
+@echo off
+rem ============================================================
+rem 把 logs 目录打包成 日志包.zip，方便发给开发者
+rem ============================================================
+chcp 65001 >nul
+setlocal
+title 声刻 收集日志
+set "ROOT=%~dp0"
+set "OUT=%ROOT%日志包.zip"
+if exist "%OUT%" del /f /q "%OUT%"
+
+echo.正在打包日志...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '%ROOT%logs') { Compress-Archive -Path '%ROOT%logs\*' -DestinationPath '%OUT%' -Force }"
+
+if exist "%OUT%" (
+  echo.
+  echo.已生成：%OUT%
+  echo.请把这个文件发回给开发者。
+) else (
+  echo.
+  echo.[提示] 没有找到 logs 目录或里面没有文件。
+  echo.       请先运行一次「启动-声刻.cmd」，再运行本脚本。
+)
+echo.
+pause
