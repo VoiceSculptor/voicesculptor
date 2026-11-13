@@ -1,0 +1,3 @@
+[submodule "engine/CosyVoice"]
+	path = engine/CosyVoice
+	url = https://github.com/VoiceSculptor/CosyVoice.git
