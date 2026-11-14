@@ -41,7 +41,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_LogicalDisk | Select-Objec
 >> "%REPORT%" echo ---- 工具 / 文件完整性 ----
 where uv >nul 2>nul
 if errorlevel 1 ( >> "%REPORT%" echo [缺失] uv 未安装（winget install astral-sh.uv） ) else ( >> "%REPORT%" echo [OK] uv )
-for %%F in ("%ENG%\runtime\python\fastapi\server.py" "%MODEL%\llm.pt" "%MODEL%\flow.pt" "%MODEL%\hift.pt" "%MODEL%\campplus.onnx" "%ROOT%app\app.py") do (
+for %%F in ("%ENG%\runtime\python\fastapi\server.py" "%MODEL%\llm.pt" "%MODEL%\flow.pt" "%MODEL%\hift.pt" "%MODEL%\campplus.onnx" "%MODEL%\speech_tokenizer_v3.onnx" "%MODEL%\CosyVoice-BlankEN\model.safetensors" "%ROOT%app\app.py") do (
   if exist %%F ( >> "%REPORT%" echo [OK]   %%~fF ) else ( >> "%REPORT%" echo [缺失] %%~fF )
 )
 
@@ -57,7 +57,7 @@ powershell -NoProfile -Command "netstat -ano | Select-String ':50000 |:8091 '" >
 >> "%REPORT%" echo.
 >> "%REPORT%" echo ---- 引擎日志（最后 40 行）----
 if exist "%ROOT%logs\engine.log" (
-  powershell -NoProfile -Command "Get-Content '%ROOT%logs\engine.log' -Tail 40" >> "%REPORT%" 2>&1
+  powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath '%ROOT%logs\engine.log' -Encoding UTF8 -Tail 40" >> "%REPORT%" 2>&1
 ) else (
   >> "%REPORT%" echo [无] 还没有 engine.log（可能从未成功启动过引擎）
 )

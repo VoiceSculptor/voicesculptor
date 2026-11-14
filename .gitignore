@@ -1,7 +1,9 @@
 .venv/
+.idea/
 /app/voices/
 /logs/
-/app/_probe.wav
+/app/_probe*.wav
+/日志包.zip
 __pycache__/
 *.pyc
 *.bak

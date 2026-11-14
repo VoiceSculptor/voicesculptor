@@ -11,6 +11,10 @@ if exist "%OUT%" del /f /q "%OUT%"
 
 echo.正在打包日志...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '%ROOT%logs') { Compress-Archive -Path '%ROOT%logs\*' -DestinationPath '%OUT%' -Force }"
+if errorlevel 1 (
+  echo.
+  echo.[警告] 日志打包失败（可能有文件正被占用）。请先关闭「声刻」窗口，再运行本脚本。
+)
 
 if exist "%OUT%" (
   echo.

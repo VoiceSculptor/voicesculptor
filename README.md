@@ -7,11 +7,12 @@
 - Windows 10/11 64 位
 - NVIDIA 独显，显存 ≥ 8GB；驱动 ≥ 570（CUDA 12.8）
 - 已安装 [uv](https://docs.astral.sh/uv/)：`winget install astral-sh.uv`
+- Python 3.11（uv 会按 `.python-version` 自动下载；不要用 3.12+，`pyworld` 没有对应轮子）
 
 ## 安装
 
 ```bash
-git clone --recurse-submodules https://github.com/<你的用户名>/voicesculptor.git
+git clone --recurse-submodules https://github.com/VoiceSculptor/voicesculptor.git
 cd voicesculptor
 ```
 
@@ -25,7 +26,9 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 
 ## 运行
 
-双击 `启动-声刻.cmd`（首次会自动 `uv sync` 安装依赖，含 CUDA 版 torch，较慢），浏览器打开 http://127.0.0.1:8091
+双击 `启动-声刻.cmd`。首次运行会自动 `uv sync`，下载 CUDA 版 torch 等约 4GB 依赖，可能需要 10 分钟以上；看到「引擎就绪」后再打开 http://127.0.0.1:8091
+
+模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录。
 
 ## 目录
 

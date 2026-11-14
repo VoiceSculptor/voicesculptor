@@ -16,7 +16,7 @@
     app/app.py                <- 本文件
     app/static/index.html     <- 前端
     app/voices/<id>/          <- 运行时生成：每个音色的 meta.json + ref.wav
-    runtime/python/           <- 便携 Python 环境
+    app/.venv/                <- uv 管理的依赖环境（首次 uv sync 生成）
     runtime/roxy-emotions-orig/    <- 6 段情绪参考音频（内置音色）
     runtime/roxy-refs-selected/    <- 精选后的参考（难过/平静）
     engine/CosyVoice/         <- 合成引擎 + 模型
@@ -40,9 +40,8 @@ import argparse
 import base64
 import json
 import os
+import re
 import struct
-import subprocess
-import sys
 import time
 import uuid
 
@@ -60,11 +59,10 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 VOICE_DIR = os.path.join(APP_DIR, 'voices')
 STATIC_DIR = os.path.join(APP_DIR, 'static')
 QA = os.path.dirname(APP_DIR)
-CLONE_PY = os.path.join(QA, 'voice-api', 'clone.py')
 ROXY_SEL = os.path.join(QA, 'runtime', 'roxy-refs-selected')
 ROXY_ORIG = os.path.join(QA, 'runtime', 'roxy-emotions-orig')
-MODEL_DIR = os.environ.get('COSYVOICE_MODEL_DIR',
-                           r'A:\CosyVoice3\CosyVoice\pretrained_models\Fun-CosyVoice3-0.5B')
+MODEL_DIR = os.environ.get('COSYVOICE_MODEL_DIR') or os.path.join(
+    QA, 'engine', 'CosyVoice', 'pretrained_models', 'Fun-CosyVoice3-0.5B')
 COSYVOICE = os.environ.get('COSYVOICE_BASE', 'http://127.0.0.1:50000')
 EMO_SVC = os.environ.get('EMOTION_BASE', 'http://127.0.0.1:50001')
 
@@ -81,9 +79,12 @@ _sess = None
 def campplus():
     global _sess
     if _sess is None:
+        onnx_path = os.path.join(MODEL_DIR, 'campplus.onnx')
+        if not os.path.isfile(onnx_path):
+            raise HTTPException(503, '找不到评测模型: ' + onnx_path + '（请设置 COSYVOICE_MODEL_DIR）')
         opt = onnxruntime.SessionOptions()
         opt.graph_optimization_level = onnxruntime.GraphOptimizationLevel.ORT_ENABLE_ALL
-        _sess = onnxruntime.InferenceSession(os.path.join(MODEL_DIR, 'campplus.onnx'),
+        _sess = onnxruntime.InferenceSession(onnx_path,
                                              sess_options=opt, providers=['CPUExecutionProvider'])
     return _sess
 
@@ -127,17 +128,35 @@ def list_voices():
     out = []
     for vid in sorted(os.listdir(VOICE_DIR)):
         meta_p = os.path.join(VOICE_DIR, vid, 'meta.json')
-        if os.path.exists(meta_p):
+        if not os.path.isfile(meta_p):
+            continue
+        try:
             with open(meta_p, encoding='utf-8') as f:
-                out.append(json.load(f))
+                meta = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if isinstance(meta, dict) and meta.get('voice_id') == vid:
+            out.append(meta)
     return out
+
+
+# ------------------------------------------------------------
+# 把 voice_id 解析成 voices 下的目录；含分隔符或 .. 的 id 一律视为不存在
+# ------------------------------------------------------------
+def _voice_dir(vid):
+    if not vid or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', vid):
+        raise HTTPException(404, 'voice not found')
+    d = os.path.join(VOICE_DIR, vid)
+    if os.path.dirname(os.path.normpath(d)) != os.path.normpath(VOICE_DIR):
+        raise HTTPException(404, 'voice not found')
+    return d
 
 
 # ------------------------------------------------------------
 # 根据 voice_id 取出元数据与参考音频路径，不存在则 404
 # ------------------------------------------------------------
 def voice_paths(vid):
-    d = os.path.join(VOICE_DIR, vid)
+    d = _voice_dir(vid)
     mp = os.path.join(d, 'meta.json')
     if not os.path.exists(mp):
         raise HTTPException(404, 'voice not found: ' + vid)
@@ -190,14 +209,17 @@ EMOTION_INSTRUCT = {
 # ------------------------------------------------------------
 # 调用一次 CosyVoice：instruct 非空走 instruct2，否则走 zero_shot
 # ------------------------------------------------------------
-def synth_once(ref_path, prompt, text, instruct):
+def synth_once(ref_path, prompt, text, instruct, speed=1.0):
     with open(ref_path, 'rb') as f:
         files = {'prompt_wav': ('p.wav', f.read(), 'application/octet-stream')}
     if instruct:
-        data = {'tts_text': text, 'instruct_text': instruct + '<|endofprompt|>'}
+        data = {'tts_text': text, 'instruct_text': instruct + '<|endofprompt|>',
+                'speed': str(speed)}
         url = COSYVOICE + '/inference_instruct2'
     else:
-        data = {'tts_text': text, 'prompt_text': 'You are a helpful assistant.<|endofprompt|>' + prompt}
+        data = {'tts_text': text,
+                'prompt_text': 'You are a helpful assistant.<|endofprompt|>' + prompt,
+                'speed': str(speed)}
         url = COSYVOICE + '/inference_zero_shot'
     r = requests.post(url, data=data, files=files, timeout=300)
     r.raise_for_status()
@@ -208,15 +230,16 @@ def synth_once(ref_path, prompt, text, instruct):
 # 对内存中的 PCM 直接算说话人向量（写临时 wav -> embed -> 删除）
 # ------------------------------------------------------------
 def _emb_bytes(pcm_bytes):
-    tmp = os.path.join(APP_DIR, '_probe.wav')
+    tmp = os.path.join(APP_DIR, '_probe_%s.wav' % uuid.uuid4().hex[:8])
     with open(tmp, 'wb') as f:
         f.write(wrap_wav(pcm_bytes, 24000))
-    e = embed(tmp)
     try:
-        os.remove(tmp)
-    except OSError:
-        pass
-    return e
+        return embed(tmp)
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 # --------------------------------------------------------------------
@@ -231,25 +254,20 @@ def index():
     return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
 
 
-# --------------------------------------------------------------------
-# 接口: @app.get('/api/health')
-# 作用: 健康检查：探测 CosyVoice(50000) 与情绪服务(50001) 是否可连
-# --------------------------------------------------------------------
+# ------------------------------------------------------------
+# 接口: GET /api/health
+# 作用: 健康检查：探测 CosyVoice(50000) 与本地评测模型是否就绪
+# ------------------------------------------------------------
 @app.get('/api/health')
-# ------------------------------------------------------------
-# 健康检查：探测 CosyVoice(50000) 与情绪服务(50001) 是否可连
-# ------------------------------------------------------------
 def health():
     engines = {}
     try:
         engines['cosyvoice'] = requests.get(COSYVOICE + '/docs', timeout=2).status_code < 500
     except Exception:
         engines['cosyvoice'] = False
-    try:
-        engines['emotion'] = requests.get(EMO_SVC + '/health', timeout=2).status_code < 500
-    except Exception:
-        engines['emotion'] = False
-    return {'ok': True, 'engines': engines, 'voices': len(list_voices())}
+    # 评测模型是本应用的硬依赖，单独上报，前端可直接看出模型目录是否正确
+    engines['model'] = os.path.isfile(os.path.join(MODEL_DIR, 'campplus.onnx'))
+    return {'ok': all(engines.values()), 'engines': engines, 'voices': len(list_voices())}
 
 
 # --------------------------------------------------------------------
@@ -289,7 +307,7 @@ async def create_voice(name: str = Form(...), prompt: str = Form(''),
 # 接口：删除音色（连同参考音频）
 # ------------------------------------------------------------
 def delete_voice(vid: str):
-    d = os.path.join(VOICE_DIR, vid)
+    d = _voice_dir(vid)
     if not os.path.isdir(d):
         raise HTTPException(404, 'voice not found')
     import shutil
@@ -312,6 +330,13 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     meta, ref = voice_paths(voice_id)
     if not text.strip():
         raise HTTPException(422, '文本为空')
+    # 评测模型缺失时尽早失败，避免先等一次完整合成
+    campplus()
+    # 语速只接受 0.5~2.0，防止引擎收到离谱的值
+    speed = max(0.5, min(2.0, float(speed)))
+
+    def _synth(instr):
+        return synth_once(ref, meta.get('prompt', ''), text, instr, speed)
 
     # 2) 决定用哪种模式：撒娇/生气默认走 instruct2（情绪更准），其余 zero_shot（音色更好）
     instruct = EMOTION_INSTRUCT.get(emotion) if mode == 'instruct2' else None
@@ -321,7 +346,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     # 3) 第一次合成（失败直接 503，让前端提示引擎不可用）
     t0 = time.time()
     try:
-        pcm = synth_once(ref, meta.get('prompt', ''), text, instruct)
+        pcm = _synth(instruct)
     except Exception as e:
         raise HTTPException(503, '合成失败: ' + str(e))
 
@@ -338,7 +363,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     while (_dur(pcm) < expected * 0.55 or _dur(pcm) > expected * 2.5) and tries < 2:
         tries += 1
         try:
-            alt = synth_once(ref, meta.get('prompt', ''), text, instruct)
+            alt = _synth(instruct)
             d_old, d_new = _dur(pcm), _dur(alt)
             # 谁更接近期望区间就选谁
             def _badness(d):
@@ -354,8 +379,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
 
     if _dur(pcm) < expected * 0.55 and instruct is None:
         try:
-            alt = synth_once(ref, meta.get('prompt', ''), text,
-                             EMOTION_INSTRUCT.get(emotion))
+            alt = _synth(EMOTION_INSTRUCT.get(emotion))
             if _dur(alt) > _dur(pcm):
                 pcm = alt
                 instruct = EMOTION_INSTRUCT.get(emotion)
@@ -364,12 +388,17 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
 
     # 5) 质量模式：best 会额外生成 n-1 条，按相似度择优；balanced 只做一次
     n = max(1, min(4, int(best_n))) if quality == 'best' else 1
-    ref_emb = embed(ref)
+    try:
+        ref_emb = embed(ref)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, '评测模型加载失败: ' + str(e))
     best_pcm = pcm
     best_s = sim(_emb_bytes(pcm), ref_emb)
     for _ in range(n - 1):
         try:
-            alt = synth_once(ref, meta.get('prompt', ''), text, instruct)
+            alt = _synth(instruct)
             s = sim(_emb_bytes(alt), ref_emb)
             if s > best_s:
                 best_pcm, best_s = alt, s
@@ -456,8 +485,9 @@ def audit_folder(dir_path):
              '| 总时长 | %.1f 分钟 |' % (total / 60),
              '| 有效片段（2~12 秒） | %.1f 分钟 |' % (usable / 60),
              '| 中位信噪比 | %.1f dB |' % med_snr,
-             '| 采样率/声道 | %s |' % ('/'.join(sorted({str(r['sr']) for r in rows})) or '-') + ' / ' +
-             ('/'.join(sorted({str(r['ch']) for r in rows})) or '-') + ' |',
+             '| 采样率/声道 | %s / %s |' % (
+                 '/'.join(sorted({str(r['sr']) for r in rows})) or '-',
+                 '/'.join(sorted({str(r['ch']) for r in rows})) or '-'),
              '', '**结论**：' + verdict, '',
              '| 文件 | 时长 | 采样率 | 声道 | SNR |', '|---|---|---|---|---|']
     for r in rows[:60]:
@@ -488,7 +518,7 @@ def audit(dir_path: str = Form(...)):
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
-    ap.add_argument('--port', type=int, default=8090)
+    ap.add_argument('--port', type=int, default=8091)
     args = ap.parse_args()
     seed_defaults()
     import uvicorn

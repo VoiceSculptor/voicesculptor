@@ -40,16 +40,19 @@ if errorlevel 1 (
   echo [错误] 未找到 uv。请先安装：winget install astral-sh.uv
   pause & exit /b 1
 )
-if not exist "%MODEL%\llm.pt" (
-  echo [错误] 找不到模型: %MODEL%\llm.pt
-  echo        请从 Release 下载权重，放到该目录
-  pause & exit /b 1
+for %%F in ("llm.pt" "flow.pt" "hift.pt" "campplus.onnx" "speech_tokenizer_v3.onnx" "CosyVoice-BlankEN\model.safetensors") do (
+  if not exist "%MODEL%\%%~F" (
+    echo [错误] 找不到模型文件: %MODEL%\%%~F
+    echo        请从 Release 下载权重，放到该目录
+    pause & exit /b 1
+  )
 )
 
 netstat -ano | findstr ":%EPORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto engine_ready
 
 echo [1/3] 启动语音引擎 ...
+echo       首次运行会下载约 4GB 依赖（含 CUDA 版 torch），可能需要 10 分钟以上，请耐心等待...
 start "声刻-引擎" /min "%ROOT%_run-engine.cmd"
 set /a _w=0
 :wait_engine
@@ -57,7 +60,7 @@ ping -n 6 127.0.0.1 >nul
 set /a _w+=5
 netstat -ano | findstr ":%EPORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto engine_up
-if %_w% GEQ 240 goto engine_timeout
+if %_w% GEQ 900 goto engine_timeout
 goto wait_engine
 
 :engine_up
@@ -66,9 +69,9 @@ goto engine_ready
 
 :engine_timeout
 echo.
-echo [失败] 引擎 240 秒内没有启动。日志最后 20 行：
+echo [失败] 引擎 15 分钟内没有启动（首次安装依赖较慢）。日志最后 20 行：
 echo --------------------------------------------
-powershell -NoProfile -Command "$p='%LOG%\engine.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Tail 20 } else { '（没有 engine.log）' }"
+powershell -NoProfile -Command "$p='%LOG%\engine.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { '（没有 engine.log）' }"
 echo --------------------------------------------
 echo 请运行「诊断.cmd」，把 logs\诊断报告.txt 发回。
 pause & exit /b 1
@@ -98,7 +101,7 @@ goto app_ready
 echo.
 echo [失败] 应用 120 秒内没有启动。日志最后 20 行：
 echo --------------------------------------------
-powershell -NoProfile -Command "$p='%LOG%\app.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Tail 20 } else { '（没有 app.log）' }"
+powershell -NoProfile -Command "$p='%LOG%\app.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { '（没有 app.log）' }"
 echo --------------------------------------------
 echo 请运行「诊断.cmd」，把 logs\诊断报告.txt 发回。
 pause & exit /b 1

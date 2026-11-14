@@ -23,6 +23,13 @@ echo.==== %date% %time% 引擎启动（uv）==== >> "%LOG%\engine.log"
 cd /d "%ENG%"
 echo ---- uv sync ---- >> "%LOG%\engine.log"
 uv sync >> "%LOG%\engine.log" 2>&1
+if errorlevel 1 (
+  echo.
+  echo [错误] 依赖安装失败（uv sync），详见 %LOG%\engine.log
+  echo.==== %date% %time% 依赖安装失败 ==== >> "%LOG%\engine.log"
+  pause
+  exit /b 1
+)
 echo ---- uv run server.py ---- >> "%LOG%\engine.log"
 uv run python -u -X faulthandler runtime\python\fastapi\server.py --port 50000 --model_dir "%MODEL%" >> "%LOG%\engine.log" 2>&1
 set "CODE=%errorlevel%"

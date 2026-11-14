@@ -5,6 +5,7 @@ description = "声刻 Studio 后端：FastAPI + CosyVoice 转发 + CAM++ 评测"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi",
+    "python-multipart>=0.0.9",
     "uvicorn[standard]",
     "requests",
     "numpy",

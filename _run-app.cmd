@@ -17,6 +17,12 @@ echo ==== %date% %time% 应用启动（uv）==== >> "%LOG%\app.log"
 cd /d "%ROOT%app"
 echo ---- uv sync ---- >> "%LOG%\app.log"
 uv sync >> "%LOG%\app.log" 2>&1
+if errorlevel 1 (
+  echo.
+  echo [错误] 依赖安装失败（uv sync），详见 %LOG%\app.log
+  pause
+  exit /b 1
+)
 echo ---- uv run app.py ---- >> "%LOG%\app.log"
 uv run python -u app.py --port 8091 >> "%LOG%\app.log" 2>&1
 set "CODE=%errorlevel%"

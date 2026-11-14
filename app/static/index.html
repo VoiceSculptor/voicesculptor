@@ -171,9 +171,15 @@ async function loadHealth(){
   try{
     const h = await api('/api/health');
     const e = h.engines || {};
-    const parts = [];
-    for (const [k,v] of Object.entries(e)) parts.push(`<span class="dot" style="background:${v?'var(--ok)':'var(--bad)'}"></span>${k}`);
-    document.getElementById('engines').innerHTML = parts.join(' &nbsp; ');
+    const LABELS = { cosyvoice: '引擎', model: '模型' };
+    const box = document.getElementById('engines');
+    box.textContent = '';
+    for (const [k,v] of Object.entries(e)){
+      const dot = document.createElement('span');
+      dot.className = 'dot';
+      dot.style.background = v ? 'var(--ok)' : 'var(--bad)';
+      box.append(dot, (LABELS[k] || k) + '  ');
+    }
   }catch(err){
     document.getElementById('engines').textContent = '服务不可用';
   }
@@ -181,6 +187,7 @@ async function loadHealth(){
 
 async function loadVoices(){
   const box = document.getElementById('voices');
+  box.style.color = '';
   try{
     const d = await api('/api/voices');
     box.innerHTML = '';
@@ -188,15 +195,26 @@ async function loadVoices(){
     for (const v of d.voices){
       const el = document.createElement('div');
       el.className = 'voice' + (state.voice === v.voice_id ? ' active' : '');
-      el.innerHTML = `<span class="emoji">${v.emoji||'★'}</span>
-        <div style="flex:1;min-width:0"><div class="nm">${v.name}</div>
-        <div class="pr">${(v.prompt||'').slice(0,26)||'（无转录）'}</div></div>`;
+      const em = document.createElement('span');
+      em.className = 'emoji';
+      em.textContent = v.emoji || '★';
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0';
+      const nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = v.name;
+      const pr = document.createElement('div');
+      pr.className = 'pr';
+      pr.textContent = (v.prompt || '').slice(0, 26) || '（无转录）';
+      info.append(nm, pr);
+      el.append(em, info);
       el.onclick = ()=>{ state.voice = v.voice_id; loadVoices(); log(`选择音色：${v.name}`); };
       box.appendChild(el);
     }
     if (!state.voice && d.voices.length){ state.voice = d.voices[0].voice_id; loadVoices(); }
   }catch(err){
-    box.innerHTML = `<div class="hint" style="color:var(--bad)">${err.message}</div>`;
+    box.textContent = err.message;
+    box.style.color = 'var(--bad)';
   }
 }
 
