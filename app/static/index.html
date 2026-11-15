@@ -83,6 +83,10 @@
       <div class="hint">新建音色</div>
       <input type="text" id="newName" placeholder="名称，如 洛琪希" style="width:100%;margin-top:6px">
       <input type="text" id="newPrompt" placeholder="参考音频的逐字转录" style="width:100%;margin-top:6px">
+      <div class="row" style="margin-top:6px">
+        <select id="newEmotion"><option>平静</option><option>开心</option><option>难过</option><option>生气</option><option>撒娇</option><option>惊讶</option></select>
+        <input id="newGroup" placeholder="分组：同一个人的多段情绪参考填同一个名字（可空）" style="flex:1;min-width:0">
+      </div>
       <input type="file" id="newFile" accept="audio/*" style="width:100%;margin-top:6px;color:var(--muted)">
       <button class="ghost" id="createBtn" style="margin-top:8px;width:100%" onclick="createVoice()">上传并建立音色</button>
     </div>
@@ -102,9 +106,10 @@
     <div class="row">
       <label>模式</label>
       <select id="mode">
-        <option value="auto">auto · 自动</option>
-        <option value="zero_shot">zero_shot · 音色优先</option>
-        <option value="instruct2">instruct2 · 情绪优先</option>
+        <option value="auto">auto · 自动（情绪优先）</option>
+        <option value="zero_shot">zero_shot · 音色优先（无情绪）</option>
+        <option value="instruct2">instruct2 · 指令优先（音色较弱）</option>
+        <option value="hybrid">hybrid · 音色+指令（实验）</option>
       </select>
       <label style="min-width:52px">质量</label>
       <select id="quality">
@@ -116,6 +121,7 @@
       <label style="min-width:52px">校验</label>
       <input type="checkbox" id="verify">
     </div>
+    <div class="row"><span class="hint">zero_shot 只复刻参考音色，选情绪不会生效；auto 会按情绪自动切到 instruct2。</span></div>
     <div class="row">
       <button id="genBtn" onclick="generate()">生成语音</button>
       <button class="ghost" onclick="document.getElementById('text').value='';">清空</button>
@@ -305,7 +311,7 @@ async function generate(){
     document.getElementById('mDur').textContent = d.duration == null ? '—' : d.duration.toFixed(2) + 's';
     document.getElementById('mLat').textContent = d.latency == null ? '—' : d.latency.toFixed(1) + 's';
     document.getElementById('mEmo').textContent = (d.emotion_detected || '—') + (d.emotion_detected === d.emotion_target ? ' ✓' : '');
-    log(`合成完成 · ${d.engine}/${d.mode} · SIM=${d.sim} · ${d.duration}s · 候选${d.candidates}`);
+    log(`合成完成 · ${d.engine}/${d.mode} · SIM=${d.sim} · ${d.duration}s · 候选${d.candidates}${d.ref_voice ? ' · 参考=' + d.ref_voice : ''}`);
   }catch(err){
     log('合成失败：' + err.message);
   }finally{
@@ -322,13 +328,17 @@ async function createVoice(){
   const btn = document.getElementById('createBtn');
   const fd = new FormData();
   fd.append('name', name); fd.append('prompt', prompt); fd.append('ref', file);
+  fd.append('emotion', document.getElementById('newEmotion').value);
+  fd.append('group', document.getElementById('newGroup').value.trim());
   btn.disabled = true; btn.textContent = '上传中…';
   try{
     const d = await api('/api/voices', { method:'POST', body: fd });
     log(`新建音色：${d.name}`);
+    if (d.warnings && d.warnings.length) log('提示：' + d.warnings.join('；'));
     state.voice = d.voice_id;
     document.getElementById('newName').value = '';
     document.getElementById('newPrompt').value = '';
+    document.getElementById('newGroup').value = '';
     document.getElementById('newFile').value = '';
     await loadVoices();
   }catch(err){ log('新建失败：' + err.message); }

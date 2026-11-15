@@ -32,6 +32,12 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 
 想再快一点可设置 `COSYVOICE_FP16=1` 后启动引擎（fp16 推理，仅 CUDA 生效，显存占用更低；个别显卡音质可能有轻微波动，默认关闭）。
 
+## 情绪模式
+
+- **auto**：有情绪指令时自动用 instruct2（情绪优先）；参考音色本身即目标情绪时用 zero_shot。
+- **zero_shot**：只复刻参考音频的音色与语气，emotion 参数不生效。
+- **instruct2**：按情绪指令合成，情绪更明显，但音色相似度可能略降。
+
 ## 目录
 
 ```

@@ -38,6 +38,7 @@
 
 import argparse
 import base64
+import hashlib
 import io
 import json
 import logging
@@ -131,6 +132,31 @@ def wrap_wav(pcm_bytes, sr=24000):
 
 
 # ------------------------------------------------------------
+# 参考音频预处理（对齐 CosyVoice 官方 webui 的 postprocess）：
+#   去首尾静音（相对峰值 -50dB，两端各留 0.1s）-> 峰值归一化 -> 尾部补 0.2s 静音
+# ------------------------------------------------------------
+def preprocess_ref(wav, sr):
+    wav = np.asarray(wav, dtype=np.float32)
+    frame, hop = max(1, int(sr * 0.025)), max(1, int(sr * 0.010))
+    if len(wav) > frame:
+        n = 1 + (len(wav) - frame) // hop
+        rms = np.array([np.sqrt(np.mean(wav[i * hop:i * hop + frame] ** 2)) for i in range(n)])
+        db = 20 * np.log10(rms + 1e-10)
+        idx = np.where(db > db.max() - 50)[0]
+        if len(idx):
+            pad = int(sr * 0.1)
+            s = max(0, idx[0] * hop - pad)
+            e = min(len(wav), idx[-1] * hop + frame + pad)
+            wav = wav[s:e]
+    peak = float(np.abs(wav).max()) if len(wav) else 0.0
+    if peak > 0.8:
+        wav = wav / peak * 0.8
+    elif 0 < peak < 0.2:
+        wav = wav / peak * 0.6
+    return np.concatenate([wav, np.zeros(int(sr * 0.2), dtype=np.float32)])
+
+
+# ------------------------------------------------------------
 # 扫描 voices 目录，读出所有音色的元数据
 # ------------------------------------------------------------
 def _load_meta(d, vid):
@@ -183,6 +209,30 @@ def voice_paths(vid):
     return meta, ref
 
 
+def voice_group(meta):
+    """同一个人的多段情绪参考共用一个 group；老的种子 meta 没有该字段，按 roxy 处理"""
+    return meta.get('group') or ('roxy' if meta.get('source') == 'seed' else '')
+
+
+def voice_emotion(meta):
+    """参考音频本身的情绪；老的种子 meta 用 name，老的上传 meta 视为平静"""
+    return meta.get('emotion') or (meta.get('name') if meta.get('source') == 'seed' else '平静')
+
+
+def find_emotion_ref(meta, emotion):
+    """在同组里找情绪 = emotion 的另一条参考，返回 (meta, ref_path) 或 None"""
+    g = voice_group(meta)
+    if not g:
+        return None
+    for m in list_voices():
+        if m['voice_id'] != meta['voice_id'] and voice_group(m) == g and voice_emotion(m) == emotion:
+            try:
+                return voice_paths(m['voice_id'])
+            except HTTPException:
+                continue
+    return None
+
+
 # ------------------------------------------------------------
 # 首次启动时把内置的 6 个情绪参考音频复制成默认音色
 # ------------------------------------------------------------
@@ -206,10 +256,13 @@ def seed_defaults():
         if os.path.exists(os.path.join(d, 'meta.json')) or not os.path.exists(ref):
             continue
         os.makedirs(d, exist_ok=True)
-        with open(ref, 'rb') as src, open(os.path.join(d, 'ref.wav'), 'wb') as dst:
-            dst.write(src.read())
+        w, s = sf.read(ref, dtype='float32')
+        if w.ndim > 1:
+            w = w.mean(axis=1)
+        sf.write(os.path.join(d, 'ref.wav'), preprocess_ref(w, s), s)
         meta = dict(voice_id=vid, name=name, prompt=prompt, emoji='★',
-                    created=time.strftime('%Y-%m-%d %H:%M:%S'), source='seed')
+                    created=time.strftime('%Y-%m-%d %H:%M:%S'), source='seed',
+                    emotion=name, group='roxy')
         with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
@@ -219,7 +272,7 @@ EMOTION_INSTRUCT = {
     '开心': 'You are a helpful assistant. 请非常开心地说一句话。',
     '难过': 'You are a helpful assistant. 请非常伤心地说一句话。',
     '生气': 'You are a helpful assistant. 请非常生气地说一句话。',
-    '平静': 'You are a helpful assistant. 请用平静、温柔的语气说一句话。',
+    '平静': 'You are a helpful assistant. 请用平静、温柔的语气慢慢说一句话。',
     '惊讶': 'You are a helpful assistant. 请用非常惊讶、意外的语气说一句话。',
 }
 
@@ -236,37 +289,56 @@ def _spk_id(ref_path):
     return '%s_%d' % (vid, int(os.path.getmtime(ref_path)))
 
 
-def _register_spk(spk, ref_path, prompt):
+def _register_spk(spk, ref_path, prompt_full):
     with open(ref_path, 'rb') as f:
         files = {'prompt_wav': ('p.wav', f.read(), 'application/octet-stream')}
-    data = {'spk_id': spk,
-            'prompt_text': 'You are a helpful assistant.<|endofprompt|>' + prompt}
-    r = HTTP.post(COSYVOICE + '/add_zero_shot_spk', data=data, files=files, timeout=120)
+    r = HTTP.post(COSYVOICE + '/add_zero_shot_spk',
+                  data={'spk_id': spk, 'prompt_text': prompt_full}, files=files, timeout=120)
     r.raise_for_status()
     _REGISTERED.add(spk)
 
 
-# ------------------------------------------------------------
-# 调用一次 CosyVoice：instruct 非空走 instruct2，否则走 zero_shot（带说话人缓存）
-# ------------------------------------------------------------
-def synth_once(ref_path, prompt, text, instruct, speed=1.0):
-    if instruct:
-        with open(ref_path, 'rb') as f:
-            files = {'prompt_wav': ('p.wav', f.read(), 'application/octet-stream')}
-        data = {'tts_text': text, 'instruct_text': instruct + '<|endofprompt|>',
-                'speed': str(speed)}
-        r = HTTP.post(COSYVOICE + '/inference_instruct2', data=data, files=files, timeout=300)
-        r.raise_for_status()
-        return r.content
-    spk = _spk_id(ref_path)
+def _zero_shot_cached(spk, ref_path, prompt_full, text, speed):
     if spk not in _REGISTERED:
-        _register_spk(spk, ref_path, prompt)
+        _register_spk(spk, ref_path, prompt_full)
     data = {'tts_text': text, 'spk_id': spk, 'speed': str(speed)}
     r = HTTP.post(COSYVOICE + '/inference_zero_shot_spk', data=data, timeout=300)
     if r.status_code == 404:  # 引擎重启过，说话人缓存丢了：重注册再试
         _REGISTERED.discard(spk)
-        _register_spk(spk, ref_path, prompt)
+        _register_spk(spk, ref_path, prompt_full)
         r = HTTP.post(COSYVOICE + '/inference_zero_shot_spk', data=data, timeout=300)
+    r.raise_for_status()
+    return r.content
+
+
+EMO_CODE = {'撒娇': 'coq', '开心': 'hap', '难过': 'sad', '生气': 'ang', '平静': 'cal', '惊讶': 'sur'}
+
+
+# ------------------------------------------------------------
+# 调用一次 CosyVoice。kind:
+#   zero_shot     参考音 + 转录（LLM/flow 两端都用 prompt，音色最好）
+#   cross_lingual 无转录时用：只用参考音，不需要 prompt_text
+#   instruct2     指令控制情绪（LLM 端不用参考语音 token，音色较弱）
+#   hybrid        实验：把情绪指令放进 zero_shot 的系统提示，保留参考语音 token
+# ------------------------------------------------------------
+def synth_once(kind, ref_path, prompt, text, instruct, speed=1.0):
+    if kind == 'zero_shot':
+        return _zero_shot_cached(_spk_id(ref_path), ref_path,
+                                 'You are a helpful assistant.<|endofprompt|>' + prompt, text, speed)
+    if kind == 'hybrid':
+        code = next((c for e, c in EMO_CODE.items() if EMOTION_INSTRUCT.get(e) == instruct), None) \
+            or 'x' + hashlib.md5(instruct.encode('utf-8')).hexdigest()[:8]
+        return _zero_shot_cached(_spk_id(ref_path) + '_' + code, ref_path,
+                                 instruct + '<|endofprompt|>' + prompt, text, speed)
+    with open(ref_path, 'rb') as f:
+        files = {'prompt_wav': ('p.wav', f.read(), 'application/octet-stream')}
+    if kind == 'cross_lingual':
+        data = {'tts_text': 'You are a helpful assistant.<|endofprompt|>' + text, 'speed': str(speed)}
+        url = '/inference_cross_lingual'
+    else:  # instruct2
+        data = {'tts_text': text, 'instruct_text': instruct + '<|endofprompt|>', 'speed': str(speed)}
+        url = '/inference_instruct2'
+    r = HTTP.post(COSYVOICE + url, data=data, files=files, timeout=300)
     r.raise_for_status()
     return r.content
 
@@ -293,6 +365,47 @@ def ref_embedding(path):
             _REF_EMB.clear()
         _REF_EMB[key] = v
     return v
+
+
+# ------------------------------------------------------------
+# 调情绪服务判定一段 WAV 的情绪，返回中文标签；服务不可用时返回 None
+# ------------------------------------------------------------
+def detect_emotion(wav_bytes):
+    try:
+        r = HTTP.post(EMO_SVC + '/emotion',
+                      files={'file': ('a.wav', wav_bytes, 'audio/wav')}, timeout=60)
+        if r.ok:
+            return r.json().get('cn')
+    except Exception as e:
+        LOG.info('情绪服务不可用: %s', e)
+    return None
+
+
+# ------------------------------------------------------------
+# 粗略估一段 24k PCM 的音高起伏与能量起伏，用于 best 择优时判断情绪强弱
+# ------------------------------------------------------------
+def prosody(pcm):
+    y = np.frombuffer(pcm, dtype='<i2').astype(np.float32) / 32768.0
+    try:
+        t = torch.from_numpy(np.ascontiguousarray(y)).unsqueeze(0)
+        f0 = torchaudio.functional.detect_pitch_frequency(t, 24000, freq_low=70, freq_high=500).flatten().numpy()
+        f0 = f0[(f0 > 70) & (f0 < 500)]
+        rng = float(np.percentile(f0, 90) - np.percentile(f0, 10)) if len(f0) else 0.0
+    except Exception:
+        rng = 0.0
+    n = len(y) // 240 * 240
+    rms = np.sqrt((y[:n].reshape(-1, 240) ** 2).mean(axis=1)) if n else np.zeros(1)
+    return rng, float(rms.std())
+
+
+# 情绪强度的方向：+1 越大越有情绪，-1 越平稳越像
+AROUSAL = {'撒娇': 1, '开心': 1, '生气': 1, '惊讶': 1, '难过': -1, '平静': -1}
+
+
+def _z(values):
+    m = sum(values) / len(values)
+    sd = (sum((v - m) ** 2 for v in values) / len(values)) ** 0.5 or 1.0
+    return [(v - m) / sd for v in values]
 
 
 # --------------------------------------------------------------------
@@ -331,7 +444,8 @@ def get_voices():
 
 @app.post('/api/voices')
 async def create_voice(name: str = Form(...), prompt: str = Form(''),
-                       emoji: str = Form(''), ref: UploadFile = File(...)):
+                       emoji: str = Form(''), emotion: str = Form('平静'),
+                       group: str = Form(''), ref: UploadFile = File(...)):
     data = await ref.read()
     if not data:
         raise HTTPException(422, '参考音频为空')
@@ -344,22 +458,36 @@ async def create_voice(name: str = Form(...), prompt: str = Form(''),
         raise HTTPException(422, '无法识别的音频文件，请上传 wav/mp3/m4a/flac/ogg')
     if wav.ndim > 1:
         wav = wav.mean(axis=1)
+    wav = preprocess_ref(wav, sr)
     dur = len(wav) / float(sr or 1)
     if not 0.5 <= dur <= 30:
         raise HTTPException(422, '参考音频时长需在 0.5~30 秒（当前 %.1f 秒）' % dur)
+    if emotion not in EMOTION_INSTRUCT:
+        raise HTTPException(422, 'emotion 只能是: ' + '/'.join(EMOTION_INSTRUCT))
+    group = group.strip()
+    if group and not re.fullmatch(r'[A-Za-z0-9_\-\u4e00-\u9fff]{1,32}', group):
+        raise HTTPException(422, 'group 只能含中英文、数字、_ -，最长 32')
+    warnings = []
+    if dur < 3:
+        warnings.append('参考音频短于 3 秒，音色还原会下降')
+    if dur > 15:
+        warnings.append('参考音频超过 15 秒，建议截取 5~12 秒的单句')
+    if not prompt.strip():
+        warnings.append('未填写转录文本：将以跨语种模式合成，音色与韵律会弱于 zero_shot')
     vid = 'v_' + uuid.uuid4().hex[:8]
     d = os.path.join(VOICE_DIR, vid)
     try:
         os.makedirs(d, exist_ok=True)
         sf.write(os.path.join(d, 'ref.wav'), wav, sr)
         meta = dict(voice_id=vid, name=name, prompt=prompt, emoji=emoji or '★',
-                    created=time.strftime('%Y-%m-%d %H:%M:%S'), source='upload')
+                    created=time.strftime('%Y-%m-%d %H:%M:%S'), source='upload',
+                    emotion=emotion, group=group)
         with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
     except Exception:
         shutil.rmtree(d, ignore_errors=True)
         raise
-    return meta
+    return dict(meta, warnings=warnings)
 
 
 # --------------------------------------------------------------------
@@ -386,7 +514,7 @@ def delete_voice(vid: str):
 @app.post('/api/tts')
 def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('平静'),
         mode: str = Form('auto'), speed: float = Form(1.0), quality: str = Form('balanced'),
-        best_n: int = Form(2), verify: bool = Form(True)):
+        best_n: int = Form(2), verify: bool = Form(True), instruct_text: str = Form('')):
     # 1) 定位音色：拿到参考音频与转录文本
     meta, ref = voice_paths(voice_id)
     if not text.strip():
@@ -394,25 +522,47 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     # 评测模型缺失时尽早失败，避免先等一次完整合成
     campplus()
     # 参数白名单：非法值早点 422，别等合成完才发现
-    if mode not in ('auto', 'zero_shot', 'instruct2'):
-        raise HTTPException(422, 'mode 只能是 auto/zero_shot/instruct2')
+    if mode not in ('auto', 'zero_shot', 'instruct2', 'hybrid'):
+        raise HTTPException(422, 'mode 只能是 auto/zero_shot/instruct2/hybrid')
     if quality not in ('balanced', 'best'):
         raise HTTPException(422, 'quality 只能是 balanced/best')
     # 语速只接受 0.5~2.0，防止引擎收到离谱的值
     speed = max(0.5, min(2.0, float(speed)))
+    instruct_text = instruct_text.strip()
+    if instruct_text and (len(instruct_text) > 200 or '<|' in instruct_text):
+        raise HTTPException(422, 'instruct_text 不能超过 200 字，且不能含 <|')
 
-    def _synth(instr):
-        return synth_once(ref, meta.get('prompt', ''), text, instr, speed)
+    # 2) 选模式与参考音频：
+    #    auto：参考情绪=目标 -> zero_shot；同组有目标情绪参考 -> 换参考走 zero_shot；否则 instruct2
+    ref_meta, ref_path = meta, ref
+    if mode == 'auto':
+        if emotion == voice_emotion(meta):
+            kind = 'zero_shot'
+        else:
+            sib = find_emotion_ref(meta, emotion)
+            if sib:
+                (ref_meta, ref_path), kind = sib, 'zero_shot'
+            else:
+                kind = 'instruct2'
+    else:
+        kind = mode
+    prompt = (ref_meta.get('prompt') or '').strip()
+    emotion_prompt = instruct_text or EMOTION_INSTRUCT.get(emotion)
+    instruct = emotion_prompt if kind in ('instruct2', 'hybrid') else None
+    if kind in ('instruct2', 'hybrid') and not instruct:
+        kind = 'zero_shot'
+    if kind == 'hybrid' and not prompt:
+        kind = 'instruct2'
+    if kind == 'zero_shot' and not prompt:
+        kind = 'cross_lingual'
 
-    # 2) 决定用哪种模式：撒娇/生气默认走 instruct2（情绪更准），其余 zero_shot（音色更好）
-    instruct = EMOTION_INSTRUCT.get(emotion) if mode == 'instruct2' else None
-    if mode == 'auto' and emotion in ('撒娇', '生气'):
-        instruct = EMOTION_INSTRUCT.get(emotion)
+    def _synth(k, instr):
+        return synth_once(k, ref_path, prompt, text, instr, speed)
 
     # 3) 第一次合成（失败直接 503，让前端提示引擎不可用）
     t0 = time.time()
     try:
-        pcm = _synth(instruct)
+        pcm = _synth(kind, instruct)
     except Exception as e:
         LOG.exception('首次合成失败')
         raise HTTPException(503, '合成失败: ' + str(e))
@@ -430,7 +580,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     while (_dur(pcm) < expected * 0.55 or _dur(pcm) > expected * 2.5) and tries < 2:
         tries += 1
         try:
-            alt = _synth(instruct)
+            alt = _synth(kind, instruct)
             d_old, d_new = _dur(pcm), _dur(alt)
             # 谁更接近期望区间就选谁
             def _badness(d):
@@ -444,52 +594,67 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         except Exception as e:
             LOG.warning('时长重试失败: %s', e)
 
-    fallback = EMOTION_INSTRUCT.get(emotion)
-    if _dur(pcm) < expected * 0.55 and instruct is None and fallback:
+    if _dur(pcm) < expected * 0.55 and kind in ('zero_shot', 'cross_lingual') and emotion_prompt:
         try:
-            alt = _synth(fallback)
+            alt = _synth('instruct2', emotion_prompt)
             if _dur(alt) > _dur(pcm):
-                pcm = alt
-                instruct = fallback
+                pcm, kind, instruct = alt, 'instruct2', emotion_prompt
         except Exception as e:
             LOG.warning('情绪回退合成失败: %s', e)
 
-    # 5) 质量模式：best 会额外生成 n-1 条，按相似度择优；balanced 只做一次
+    # 5) 质量模式：best 会额外生成 n-1 条候选；balanced 只做一次。
+    #    择优规则：verify 打开且有多条候选时，先按“情绪强度”排序（撒娇/开心/生气/惊讶看音高与
+    #    能量起伏，平静/难过看平稳度），再叠加相似度；verify 关闭时仍按相似度择优。
+    #    只按相似度会系统性淘汰情绪强的候选（参考音频多是平静语气）。
     n = max(1, min(4, int(best_n))) if quality == 'best' else 1
     try:
-        ref_emb = ref_embedding(ref)
+        ref_emb = ref_embedding(ref_path)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(503, '评测模型加载失败: ' + str(e))
-    best_pcm = pcm
-    try:
-        best_s = sim(_emb_bytes(pcm), ref_emb)
-    except Exception as e:
-        LOG.warning('相似度计算失败: %s', e)
-        best_s = None
+    cands = [pcm]
     for _ in range(n - 1):
         try:
-            alt = _synth(instruct)
-            s = sim(_emb_bytes(alt), ref_emb)
-            if best_s is None or s > best_s:
-                best_pcm, best_s = alt, s
+            cands.append(_synth(kind, instruct))
         except Exception as e:
-            LOG.warning('候选择优失败: %s', e)
+            LOG.warning('候选生成失败: %s', e)
+    scored = []
+    for c in cands:
+        try:
+            s = sim(_emb_bytes(c), ref_emb)
+        except Exception as e:
+            LOG.warning('相似度计算失败: %s', e)
+            s = None
+        det = detect_emotion(wrap_wav(c, 24000)) if (verify and len(cands) > 1) else None
+        scored.append({'pcm': c, 'sim': s, 'expr': prosody(c), 'det': det})
+    if verify and len(scored) > 1 and emotion in AROUSAL:
+        sign = AROUSAL[emotion]
+        z_rng = _z([x['expr'][0] for x in scored])
+        z_rms = _z([x['expr'][1] for x in scored])
+        z_sim = _z([x['sim'] if x['sim'] is not None else 0.0 for x in scored])
+        for i, x in enumerate(scored):
+            x['rank'] = sign * (0.6 * z_rng[i] + 0.4 * z_rms[i]) + 0.3 * z_sim[i]
+    else:
+        for x in scored:
+            x['rank'] = -2.0 if x['sim'] is None else x['sim']
+    # verify 且有多条候选时再用情绪判定校正：命中目标情绪加分，音色明显漂移的候选重罚
+    if verify and len(scored) > 1:
+        sims = [x['sim'] for x in scored if x['sim'] is not None]
+        top = max(sims) if sims else None
+        for x in scored:
+            if x.get('det') == emotion:
+                x['rank'] += 1.0
+            if top is not None and x['sim'] is not None and x['sim'] < top - 0.05:
+                x['rank'] -= 10.0
+    best = max(scored, key=lambda x: x['rank'])
+    best_pcm, best_s = best['pcm'], best['sim']
 
     # 6) 包装成 WAV，并计算时长
     wav = wrap_wav(best_pcm, 24000)
     duration = len(best_pcm) / 2 / 24000
-    # 7) 可选：让情绪服务判断实际情绪（用于对比目标情绪）
-    detected = None
-    if verify:
-        try:
-            r = HTTP.post(EMO_SVC + '/emotion',
-                          files={'file': ('a.wav', wav, 'audio/wav')}, timeout=60)
-            if r.ok:
-                detected = r.json().get('cn')
-        except Exception as e:
-            LOG.info('情绪服务不可用: %s', e)
+    # 7) 可选：让情绪服务判断实际情绪（多候选时命中的候选已带上 det，避免重复调用）
+    detected = best.get('det') if best.get('det') is not None else (detect_emotion(wav) if verify else None)
 
     return JSONResponse({
         'audio_base64': base64.b64encode(wav).decode('ascii'),
@@ -497,7 +662,8 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         'duration': round(duration, 2),
         'latency': round(time.time() - t0, 2),
         'engine': 'cosyvoice',
-        'mode': 'instruct2' if instruct else 'zero_shot',
+        'mode': kind,
+        'ref_voice': ref_meta['voice_id'],
         'emotion_target': emotion,
         'emotion_detected': detected,
         'candidates': n,
