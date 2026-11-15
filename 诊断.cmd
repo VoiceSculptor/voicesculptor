@@ -41,18 +41,22 @@ powershell -NoProfile -Command "Get-CimInstance Win32_LogicalDisk | Select-Objec
 >> "%REPORT%" echo ---- 工具 / 文件完整性 ----
 where uv >nul 2>nul
 if errorlevel 1 ( >> "%REPORT%" echo [缺失] uv 未安装（winget install astral-sh.uv） ) else ( >> "%REPORT%" echo [OK] uv )
-for %%F in ("%ENG%\runtime\python\fastapi\server.py" "%MODEL%\llm.pt" "%MODEL%\flow.pt" "%MODEL%\hift.pt" "%MODEL%\campplus.onnx" "%MODEL%\speech_tokenizer_v3.onnx" "%MODEL%\CosyVoice-BlankEN\model.safetensors" "%ROOT%app\app.py") do (
+for %%F in ("%ENG%\runtime\python\fastapi\server.py" "%MODEL%\llm.pt" "%MODEL%\flow.pt" "%MODEL%\hift.pt" "%MODEL%\campplus.onnx" "%MODEL%\speech_tokenizer_v3.onnx" "%MODEL%\CosyVoice-BlankEN\model.safetensors" "%MODEL%\cosyvoice3.yaml" "%MODEL%\config.json" "%ROOT%app\app.py") do (
   if exist %%F ( >> "%REPORT%" echo [OK]   %%~fF ) else ( >> "%REPORT%" echo [缺失] %%~fF )
 )
 
 >> "%REPORT%" echo.
 >> "%REPORT%" echo ---- Python / CUDA 自检（引擎 uv 环境）----
-cd /d "%ENG%"
-uv run python "%ROOT%_selfcheck.py" >> "%REPORT%" 2>&1
+cd /d "%ENG%" 2>nul
+if errorlevel 1 (
+  >> "%REPORT%" echo [错误] 找不到引擎目录: %ENG%
+) else (
+  uv run python "%ROOT%_selfcheck.py" >> "%REPORT%" 2>&1
+)
 
 >> "%REPORT%" echo.
 >> "%REPORT%" echo ---- 端口占用 ----
-powershell -NoProfile -Command "netstat -ano | Select-String ':50000 |:8091 '" >> "%REPORT%" 2>&1
+powershell -NoProfile -Command "netstat -ano | Select-String -Pattern ':50000\s',':8091\s'" >> "%REPORT%" 2>&1
 
 >> "%REPORT%" echo.
 >> "%REPORT%" echo ---- 引擎日志（最后 40 行）----
@@ -60,6 +64,14 @@ if exist "%ROOT%logs\engine.log" (
   powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath '%ROOT%logs\engine.log' -Encoding UTF8 -Tail 40" >> "%REPORT%" 2>&1
 ) else (
   >> "%REPORT%" echo [无] 还没有 engine.log（可能从未成功启动过引擎）
+)
+
+>> "%REPORT%" echo.
+>> "%REPORT%" echo ---- 应用日志（最后 40 行）----
+if exist "%ROOT%logs\app.log" (
+  powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath '%ROOT%logs\app.log' -Encoding UTF8 -Tail 40" >> "%REPORT%" 2>&1
+) else (
+  >> "%REPORT%" echo [无] 还没有 app.log（应用可能从未成功启动过）
 )
 
 echo.

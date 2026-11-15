@@ -26,9 +26,9 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 
 ## 运行
 
-双击 `启动-声刻.cmd`。首次运行会自动 `uv sync`，下载 CUDA 版 torch 等约 4GB 依赖，可能需要 10 分钟以上；看到「引擎就绪」后再打开 http://127.0.0.1:8091
+双击 `启动-声刻.cmd`。首次运行会自动 `uv sync`，下载 CUDA 版 torch 等约 4GB 依赖，可能需要 10 分钟以上；脚本在引擎/应用就绪后会自动打开 http://127.0.0.1:8091（也可以手动访问）。
 
-模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录。
+模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录（启动器、引擎启动脚本、应用都会读取）。
 
 ## 目录
 

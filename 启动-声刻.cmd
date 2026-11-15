@@ -22,6 +22,7 @@ title 声刻 Studio（uv）
 set "ROOT=%~dp0"
 set "ENG=%ROOT%engine\CosyVoice"
 set "MODEL=%ENG%\pretrained_models\Fun-CosyVoice3-0.5B"
+if defined COSYVOICE_MODEL_DIR set "MODEL=%COSYVOICE_MODEL_DIR%"
 set "PORT=8091"
 set "EPORT=50000"
 set "LOG=%ROOT%logs"
@@ -51,6 +52,7 @@ for %%F in ("llm.pt" "flow.pt" "hift.pt" "campplus.onnx" "speech_tokenizer_v3.on
 netstat -ano | findstr ":%EPORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto engine_ready
 
+if exist "%LOG%\engine.failed" del /q "%LOG%\engine.failed"
 echo [1/3] 启动语音引擎 ...
 echo       首次运行会下载约 4GB 依赖（含 CUDA 版 torch），可能需要 10 分钟以上，请耐心等待...
 start "声刻-引擎" /min "%ROOT%_run-engine.cmd"
@@ -58,8 +60,9 @@ set /a _w=0
 :wait_engine
 ping -n 6 127.0.0.1 >nul
 set /a _w+=5
-netstat -ano | findstr ":%EPORT% " | findstr LISTENING >nul
+netstat -ano | findstr /C:":%EPORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto engine_up
+if exist "%LOG%\engine.failed" goto engine_failed
 if %_w% GEQ 900 goto engine_timeout
 goto wait_engine
 
@@ -67,9 +70,15 @@ goto wait_engine
 echo       引擎就绪（%_w% 秒）
 goto engine_ready
 
+:engine_failed
+echo.
+echo [失败] 引擎启动失败（多半是依赖安装失败，不是启动慢）。日志最后 20 行：
+goto engine_print_log
+
 :engine_timeout
 echo.
 echo [失败] 引擎 15 分钟内没有启动（首次安装依赖较慢）。日志最后 20 行：
+:engine_print_log
 echo --------------------------------------------
 powershell -NoProfile -Command "$p='%LOG%\engine.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { '（没有 engine.log）' }"
 echo --------------------------------------------
@@ -82,24 +91,32 @@ echo [1/3] 引擎已在运行（端口 %EPORT%）
 netstat -ano | findstr ":%PORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto app_ready
 
+if exist "%LOG%\app.failed" del /q "%LOG%\app.failed"
 echo [2/3] 启动声刻 Studio...
 start "声刻-应用" /min "%ROOT%_run-app.cmd"
 set /a _a=0
 :wait_app
 ping -n 4 127.0.0.1 >nul
 set /a _a+=3
-netstat -ano | findstr ":%PORT% " | findstr LISTENING >nul
+netstat -ano | findstr /C:":%PORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto app_up
-if %_a% GEQ 120 goto app_timeout
+if exist "%LOG%\app.failed" goto app_failed
+if %_a% GEQ 600 goto app_timeout
 goto wait_app
 
 :app_up
 echo       应用就绪（%_a% 秒）
 goto app_ready
 
+:app_failed
+echo.
+echo [失败] 应用启动失败（多半是依赖安装失败，不是启动慢）。日志最后 20 行：
+goto app_print_log
+
 :app_timeout
 echo.
-echo [失败] 应用 120 秒内没有启动。日志最后 20 行：
+echo [失败] 应用 10 分钟内没有启动。日志最后 20 行：
+:app_print_log
 echo --------------------------------------------
 powershell -NoProfile -Command "$p='%LOG%\app.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { '（没有 app.log）' }"
 echo --------------------------------------------

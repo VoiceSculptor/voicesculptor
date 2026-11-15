@@ -7,7 +7,15 @@ setlocal
 title 声刻 收集日志
 set "ROOT=%~dp0"
 set "OUT=%ROOT%日志包.zip"
+if not exist "%ROOT%logs" mkdir "%ROOT%logs"
 if exist "%OUT%" del /f /q "%OUT%"
+
+echo.正在收集环境信息...
+> "%ROOT%logs\环境.txt" echo 时间: %date% %time%
+>> "%ROOT%logs\环境.txt" echo 目录: %ROOT%
+uv --version >> "%ROOT%logs\环境.txt" 2>&1
+git -C "%ROOT%." rev-parse --short HEAD >> "%ROOT%logs\环境.txt" 2>&1
+git -C "%ROOT%engine\CosyVoice" rev-parse --short HEAD >> "%ROOT%logs\环境.txt" 2>&1
 
 echo.正在打包日志...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '%ROOT%logs') { Compress-Archive -Path '%ROOT%logs\*' -DestinationPath '%OUT%' -Force }"

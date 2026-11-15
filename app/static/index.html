@@ -102,7 +102,7 @@
       <label style="min-width:52px">候选</label>
       <input type="number" id="bestN" min="1" max="4" value="2" style="width:64px">
       <label style="min-width:52px">校验</label>
-      <input type="checkbox" id="verify" checked>
+      <input type="checkbox" id="verify">
     </div>
     <div class="row">
       <button id="genBtn" onclick="generate()">生成语音</button>
@@ -121,7 +121,7 @@
   <!-- 右：体检 + 日志 -->
   <div class="panel">
     <h2>素材体检</h2>
-    <input type="text" id="auditDir" placeholder="录音文件夹路径，如 E:\\voice-record" style="width:100%">
+    <input type="text" id="auditDir" placeholder="录音文件夹路径，如 E:\voice-record" style="width:100%">
     <button class="ghost" style="margin-top:8px;width:100%" onclick="runAudit()">运行体检</button>
     <div id="auditOut" class="log" style="height:180px;margin-top:10px">等待运行…</div>
     <h2 style="margin-top:16px">日志</h2>
@@ -132,6 +132,7 @@
 <script>
 const EMOTIONS = ['撒娇','开心','难过','生气','平静','惊讶'];
 let state = { voice: null, emotion: '平静' };
+let audioUrl = null;
 
 function log(msg){
   const el = document.getElementById('log');
@@ -248,12 +249,13 @@ async function generate(){
     fd.append('verify', document.getElementById('verify').checked ? 'true' : 'false');
     const d = await api('/api/tts', { method:'POST', body: fd });
     const bytes = Uint8Array.from(atob(d.audio_base64), c=>c.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], {type:'audio/wav'}));
-    document.getElementById('player').src = url;
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+    audioUrl = URL.createObjectURL(new Blob([bytes], {type:'audio/wav'}));
+    document.getElementById('player').src = audioUrl;
     document.getElementById('player').play().catch(()=>{});
-    document.getElementById('mSim').textContent = d.sim.toFixed(3);
-    document.getElementById('mDur').textContent = d.duration.toFixed(2) + 's';
-    document.getElementById('mLat').textContent = d.latency.toFixed(1) + 's';
+    document.getElementById('mSim').textContent = d.sim == null ? '—' : d.sim.toFixed(3);
+    document.getElementById('mDur').textContent = d.duration == null ? '—' : d.duration.toFixed(2) + 's';
+    document.getElementById('mLat').textContent = d.latency == null ? '—' : d.latency.toFixed(1) + 's';
     document.getElementById('mEmo').textContent = (d.emotion_detected || '—') + (d.emotion_detected === d.emotion_target ? ' ✓' : '');
     log(`合成完成 · ${d.engine}/${d.mode} · SIM=${d.sim} · ${d.duration}s · 候选${d.candidates}`);
   }catch(err){
@@ -294,6 +296,8 @@ async function runAudit(){
 document.getElementById('speed').addEventListener('input', e=>{
   document.getElementById('speedVal').textContent = Number(e.target.value).toFixed(2);
 });
+
+window.addEventListener('beforeunload', ()=>{ if (audioUrl) URL.revokeObjectURL(audioUrl); });
 
 renderEmotions();
 loadHealth(); loadVoices();

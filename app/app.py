@@ -38,9 +38,12 @@
 
 import argparse
 import base64
+import io
 import json
+import logging
 import os
 import re
+import shutil
 import struct
 import time
 import uuid
@@ -70,6 +73,7 @@ os.makedirs(VOICE_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 app = FastAPI(title='声刻 Studio', version='1.0.0')
+LOG = logging.getLogger('voicesculptor')
 _sess = None
 
 
@@ -124,18 +128,26 @@ def wrap_wav(pcm_bytes, sr=24000):
 # ------------------------------------------------------------
 # 扫描 voices 目录，读出所有音色的元数据
 # ------------------------------------------------------------
+def _load_meta(d, vid):
+    """读取并校验一个音色的 meta.json；损坏或不属于该音色时返回 None"""
+    mp = os.path.join(d, 'meta.json')
+    if not os.path.isfile(mp):
+        return None
+    try:
+        with open(mp, encoding='utf-8') as f:
+            meta = json.load(f)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(meta, dict) or meta.get('voice_id') != vid:
+        return None
+    return meta
+
+
 def list_voices():
     out = []
     for vid in sorted(os.listdir(VOICE_DIR)):
-        meta_p = os.path.join(VOICE_DIR, vid, 'meta.json')
-        if not os.path.isfile(meta_p):
-            continue
-        try:
-            with open(meta_p, encoding='utf-8') as f:
-                meta = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if isinstance(meta, dict) and meta.get('voice_id') == vid:
+        meta = _load_meta(os.path.join(VOICE_DIR, vid), vid)
+        if meta is not None:
             out.append(meta)
     return out
 
@@ -157,12 +169,13 @@ def _voice_dir(vid):
 # ------------------------------------------------------------
 def voice_paths(vid):
     d = _voice_dir(vid)
-    mp = os.path.join(d, 'meta.json')
-    if not os.path.exists(mp):
+    meta = _load_meta(d, vid)
+    if meta is None:
         raise HTTPException(404, 'voice not found: ' + vid)
-    with open(mp, encoding='utf-8') as f:
-        meta = json.load(f)
-    return meta, os.path.join(d, 'ref.wav')
+    ref = os.path.join(d, 'ref.wav')
+    if not os.path.isfile(ref):
+        raise HTTPException(404, '参考音频丢失: ' + vid)
+    return meta, ref
 
 
 # ------------------------------------------------------------
@@ -285,16 +298,33 @@ def get_voices():
 @app.post('/api/voices')
 async def create_voice(name: str = Form(...), prompt: str = Form(''),
                        emoji: str = Form(''), ref: UploadFile = File(...)):
+    data = await ref.read()
+    if not data:
+        raise HTTPException(422, '参考音频为空')
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(413, '参考音频过大（上限 20MB）')
+    # 统一转成 WAV 保存，避免把 mp3/m4a 原样写成 .wav 后引擎读不了
+    try:
+        wav, sr = sf.read(io.BytesIO(data), dtype='float32')
+    except Exception:
+        raise HTTPException(422, '无法识别的音频文件，请上传 wav/mp3/m4a/flac/ogg')
+    if wav.ndim > 1:
+        wav = wav.mean(axis=1)
+    dur = len(wav) / float(sr or 1)
+    if not 0.5 <= dur <= 30:
+        raise HTTPException(422, '参考音频时长需在 0.5~30 秒（当前 %.1f 秒）' % dur)
     vid = 'v_' + uuid.uuid4().hex[:8]
     d = os.path.join(VOICE_DIR, vid)
-    os.makedirs(d, exist_ok=True)
-    data = await ref.read()
-    with open(os.path.join(d, 'ref.wav'), 'wb') as f:
-        f.write(data)
-    meta = dict(voice_id=vid, name=name, prompt=prompt, emoji=emoji or '★',
-                created=time.strftime('%Y-%m-%d %H:%M:%S'), source='upload')
-    with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
-        json.dump(meta, f, ensure_ascii=False, indent=2)
+    try:
+        os.makedirs(d, exist_ok=True)
+        sf.write(os.path.join(d, 'ref.wav'), wav, sr)
+        meta = dict(voice_id=vid, name=name, prompt=prompt, emoji=emoji or '★',
+                    created=time.strftime('%Y-%m-%d %H:%M:%S'), source='upload')
+        with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, indent=2)
+    except Exception:
+        shutil.rmtree(d, ignore_errors=True)
+        raise
     return meta
 
 
@@ -310,8 +340,9 @@ def delete_voice(vid: str):
     d = _voice_dir(vid)
     if not os.path.isdir(d):
         raise HTTPException(404, 'voice not found')
-    import shutil
     shutil.rmtree(d, ignore_errors=True)
+    if os.path.isdir(d):
+        raise HTTPException(500, '删除失败：目录仍被占用，请关闭占用的程序后重试')
     return {'ok': True}
 
 
@@ -348,6 +379,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     try:
         pcm = _synth(instruct)
     except Exception as e:
+        LOG.exception('首次合成失败')
         raise HTTPException(503, '合成失败: ' + str(e))
 
     # 4) 时长健全性检查（CosyVoice 偶发“早停”或“生成过长”，必须兜底）
@@ -374,17 +406,18 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
                 return 0.0
             if _badness(d_new) < _badness(d_old):
                 pcm = alt
-        except Exception:
-            pass
+        except Exception as e:
+            LOG.warning('时长重试失败: %s', e)
 
-    if _dur(pcm) < expected * 0.55 and instruct is None:
+    fallback = EMOTION_INSTRUCT.get(emotion)
+    if _dur(pcm) < expected * 0.55 and instruct is None and fallback:
         try:
-            alt = _synth(EMOTION_INSTRUCT.get(emotion))
+            alt = _synth(fallback)
             if _dur(alt) > _dur(pcm):
                 pcm = alt
-                instruct = EMOTION_INSTRUCT.get(emotion)
-        except Exception:
-            pass
+                instruct = fallback
+        except Exception as e:
+            LOG.warning('情绪回退合成失败: %s', e)
 
     # 5) 质量模式：best 会额外生成 n-1 条，按相似度择优；balanced 只做一次
     n = max(1, min(4, int(best_n))) if quality == 'best' else 1
@@ -395,15 +428,19 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     except Exception as e:
         raise HTTPException(503, '评测模型加载失败: ' + str(e))
     best_pcm = pcm
-    best_s = sim(_emb_bytes(pcm), ref_emb)
+    try:
+        best_s = sim(_emb_bytes(pcm), ref_emb)
+    except Exception as e:
+        LOG.warning('相似度计算失败: %s', e)
+        best_s = None
     for _ in range(n - 1):
         try:
             alt = _synth(instruct)
             s = sim(_emb_bytes(alt), ref_emb)
-            if s > best_s:
+            if best_s is None or s > best_s:
                 best_pcm, best_s = alt, s
-        except Exception:
-            pass
+        except Exception as e:
+            LOG.warning('候选择优失败: %s', e)
 
     # 6) 包装成 WAV，并计算时长
     wav = wrap_wav(best_pcm, 24000)
@@ -416,12 +453,12 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
                               files={'file': ('a.wav', wav, 'audio/wav')}, timeout=60)
             if r.ok:
                 detected = r.json().get('cn')
-        except Exception:
-            pass
+        except Exception as e:
+            LOG.info('情绪服务不可用: %s', e)
 
     return JSONResponse({
         'audio_base64': base64.b64encode(wav).decode('ascii'),
-        'sim': round(best_s, 3),
+        'sim': round(best_s, 3) if best_s is not None else None,
         'duration': round(duration, 2),
         'latency': round(time.time() - t0, 2),
         'engine': 'cosyvoice',
@@ -438,7 +475,11 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
 def audit_folder(dir_path):
     """轻量素材体检：时长 / 采样率 / 声道 / SNR / 总量 + 结论"""
     rows = []
-    for fn in sorted(os.listdir(dir_path)):
+    try:
+        names = sorted(os.listdir(dir_path))
+    except OSError as e:
+        raise HTTPException(500, '无法读取目录: ' + str(e))
+    for fn in names:
         if not fn.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.ogg')):
             continue
         p = os.path.join(dir_path, fn)
@@ -511,8 +552,11 @@ def audit(dir_path: str = Form(...)):
     if not os.path.isdir(dir_path):
         raise HTTPException(422, '目录不存在: ' + dir_path)
     report, summary = audit_folder(dir_path)
-    with open(os.path.join(APP_DIR, 'audit-report.md'), 'w', encoding='utf-8') as f:
-        f.write(report)
+    try:
+        with open(os.path.join(APP_DIR, 'audit-report.md'), 'w', encoding='utf-8') as f:
+            f.write(report)
+    except OSError as e:
+        raise HTTPException(500, '报告写入失败: ' + str(e))
     return {'ok': True, 'report': report, 'summary': summary}
 
 

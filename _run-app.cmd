@@ -13,19 +13,25 @@ set "LOG=%ROOT%logs"
 if not exist "%LOG%" mkdir "%LOG%"
 set "PYTHONUTF8=1"
 
+if exist "%LOG%\app.failed" del /q "%LOG%\app.failed"
 echo ==== %date% %time% 应用启动（uv）==== >> "%LOG%\app.log"
-cd /d "%ROOT%app"
+cd /d "%ROOT%app" 2>nul || (
+  echo [错误] 找不到应用目录: %ROOT%app
+  pause & exit /b 1
+)
 echo ---- uv sync ---- >> "%LOG%\app.log"
 uv sync >> "%LOG%\app.log" 2>&1
 if errorlevel 1 (
   echo.
   echo [错误] 依赖安装失败（uv sync），详见 %LOG%\app.log
+  > "%LOG%\app.failed" echo sync-failed
   pause
   exit /b 1
 )
 echo ---- uv run app.py ---- >> "%LOG%\app.log"
 uv run python -u app.py --port 8091 >> "%LOG%\app.log" 2>&1
 set "CODE=%errorlevel%"
+if not "%CODE%"=="0" > "%LOG%\app.failed" echo exit-%CODE%
 echo. >> "%LOG%\app.log"
 echo ==== %date% %time% 应用退出，退出码 %CODE% ==== >> "%LOG%\app.log"
 echo.
