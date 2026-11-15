@@ -30,6 +30,8 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 
 模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录（启动器、引擎启动脚本、应用都会读取）。
 
+想再快一点可设置 `COSYVOICE_FP16=1` 后启动引擎（fp16 推理，仅 CUDA 生效，显存占用更低；个别显卡音质可能有轻微波动，默认关闭）。
+
 ## 目录
 
 ```

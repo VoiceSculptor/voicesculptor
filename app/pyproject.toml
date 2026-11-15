@@ -1,16 +1,26 @@
 [project]
 name = "voicesculptor"
-version = "1.0.0"
+version = "1.1.0"
 description = "声刻 Studio 后端：FastAPI + CosyVoice 转发 + CAM++ 评测"
-requires-python = ">=3.10,<3.12"
+requires-python = ">=3.11,<3.12"
 dependencies = [
-    "fastapi",
-    "python-multipart>=0.0.20",
-    "uvicorn[standard]",
-    "requests",
-    "numpy",
-    "onnxruntime",
-    "soundfile",
-    "torch",
-    "torchaudio",
+    "fastapi>=0.163.0",
+    "python-multipart>=0.0.33",
+    "uvicorn[standard]>=0.54.0",
+    "requests>=2.34.2",
+    "numpy>=2.4.6,<3",
+    "onnxruntime>=1.32.0",
+    "soundfile>=0.14.0",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
 ]
+
+# 与引擎共用同一份 cu128 轮子，uv 缓存可复用，首装少下约 2.5GB
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }

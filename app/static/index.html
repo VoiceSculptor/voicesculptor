@@ -24,11 +24,15 @@
   .voice .emoji{font-size:16px}
   .voice .nm{font-weight:600}
   .voice .pr{color:var(--muted);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px}
+  .voice .del{opacity:0;padding:2px 8px;font-size:12px;font-weight:500;background:transparent;border:1px solid var(--line);color:var(--muted)}
+  .voice:hover .del{opacity:1}
+  .voice .del:hover{color:var(--bad);border-color:var(--bad)}
   textarea{width:100%;min-height:96px;resize:vertical;background:var(--panel2);border:1px solid var(--line);
     color:var(--text);border-radius:9px;padding:11px;font:inherit;outline:none}
   textarea:focus{border-color:var(--accent)}
   .chips{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0}
-  .chip{padding:6px 12px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;font-size:13px}
+  .chip{padding:6px 12px;border-radius:999px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;font-size:13px;
+    color:var(--text);font-family:inherit;font-weight:500}
   .chip.active{background:rgba(79,140,255,.18);border-color:var(--accent);color:#cfe0ff}
   .row{display:flex;align-items:center;gap:10px;margin:9px 0;flex-wrap:wrap}
   .row label{color:var(--muted);min-width:64px;font-size:12px}
@@ -51,6 +55,7 @@
   table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
   td,th{padding:5px 6px;border-bottom:1px solid var(--line);text-align:left}
   th{color:var(--muted);font-weight:500}
+  @media (max-width:1100px){ .main{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -79,7 +84,7 @@
       <input type="text" id="newName" placeholder="名称，如 洛琪希" style="width:100%;margin-top:6px">
       <input type="text" id="newPrompt" placeholder="参考音频的逐字转录" style="width:100%;margin-top:6px">
       <input type="file" id="newFile" accept="audio/*" style="width:100%;margin-top:6px;color:var(--muted)">
-      <button class="ghost" style="margin-top:8px;width:100%" onclick="createVoice()">上传并建立音色</button>
+      <button class="ghost" id="createBtn" style="margin-top:8px;width:100%" onclick="createVoice()">上传并建立音色</button>
     </div>
   </div>
 
@@ -87,6 +92,7 @@
   <div class="panel">
     <h2>合成</h2>
     <textarea id="text" placeholder="输入要合成的文本…">欢迎来到声刻，今天也请多关照。</textarea>
+    <div class="row" style="margin-top:4px"><span class="hint" id="charCount">0 字</span></div>
     <div class="row"><label>情绪</label><div class="chips" id="emotions"></div></div>
     <div class="row">
       <label>语速</label>
@@ -94,7 +100,13 @@
       <span id="speedVal" class="badge">1.00</span>
     </div>
     <div class="row">
-      <label>质量</label>
+      <label>模式</label>
+      <select id="mode">
+        <option value="auto">auto · 自动</option>
+        <option value="zero_shot">zero_shot · 音色优先</option>
+        <option value="instruct2">instruct2 · 情绪优先</option>
+      </select>
+      <label style="min-width:52px">质量</label>
       <select id="quality">
         <option value="balanced">balanced · 单次（快）</option>
         <option value="best">best · 多候选择优（慢）</option>
@@ -107,7 +119,7 @@
     <div class="row">
       <button id="genBtn" onclick="generate()">生成语音</button>
       <button class="ghost" onclick="document.getElementById('text').value='';">清空</button>
-      <span class="hint">参考：4~6 秒、干净、情绪贴合</span>
+      <span class="hint">Ctrl+Enter 生成 · 参考：4~6 秒、干净、情绪贴合</span>
     </div>
     <div class="metrics">
       <div class="metric"><div class="k">相似度 SIM</div><div class="v" id="mSim">—</div></div>
@@ -116,6 +128,7 @@
       <div class="metric"><div class="k">情绪</div><div class="v" id="mEmo">—</div></div>
     </div>
     <audio id="player" controls></audio>
+    <a id="dl" class="badge" style="display:none;margin-top:8px" download>下载 WAV</a>
   </div>
 
   <!-- 右：体检 + 日志 -->
@@ -131,7 +144,7 @@
 
 <script>
 const EMOTIONS = ['撒娇','开心','难过','生气','平静','惊讶'];
-let state = { voice: null, emotion: '平静' };
+let state = { voice: null, emotion: '平静', voices: [] };
 let audioUrl = null;
 
 function log(msg){
@@ -181,8 +194,12 @@ async function loadHealth(){
       dot.style.background = v ? 'var(--ok)' : 'var(--bad)';
       box.append(dot, (LABELS[k] || k) + '  ');
     }
+    const gen = document.getElementById('genBtn');
+    if (gen) gen.title = (e.cosyvoice === false) ? '引擎未就绪，详见 logs/engine.log' : '';
   }catch(err){
     document.getElementById('engines').textContent = '服务不可用';
+    const gen = document.getElementById('genBtn');
+    if (gen) gen.title = '引擎未就绪，详见 logs/engine.log';
   }
 }
 
@@ -191,31 +208,53 @@ async function loadVoices(){
   box.style.color = '';
   try{
     const d = await api('/api/voices');
-    box.innerHTML = '';
-    if (!d.voices.length){ box.innerHTML = '<div class="hint">还没有音色，请上传参考音频</div>'; return; }
-    for (const v of d.voices){
-      const el = document.createElement('div');
-      el.className = 'voice' + (state.voice === v.voice_id ? ' active' : '');
-      const em = document.createElement('span');
-      em.className = 'emoji';
-      em.textContent = v.emoji || '★';
-      const info = document.createElement('div');
-      info.style.cssText = 'flex:1;min-width:0';
-      const nm = document.createElement('div');
-      nm.className = 'nm';
-      nm.textContent = v.name;
-      const pr = document.createElement('div');
-      pr.className = 'pr';
-      pr.textContent = (v.prompt || '').slice(0, 26) || '（无转录）';
-      info.append(nm, pr);
-      el.append(em, info);
-      el.onclick = ()=>{ state.voice = v.voice_id; loadVoices(); log(`选择音色：${v.name}`); };
-      box.appendChild(el);
-    }
-    if (!state.voice && d.voices.length){ state.voice = d.voices[0].voice_id; loadVoices(); }
+    state.voices = d.voices || [];
+    if (!state.voice && state.voices.length) state.voice = state.voices[0].voice_id;
+    renderVoices();
   }catch(err){
     box.textContent = err.message;
     box.style.color = 'var(--bad)';
+  }
+}
+
+function renderVoices(){
+  const box = document.getElementById('voices');
+  box.innerHTML = '';
+  if (!state.voices.length){ box.innerHTML = '<div class="hint">还没有音色，请上传参考音频</div>'; return; }
+  for (const v of state.voices){
+    const el = document.createElement('div');
+    el.className = 'voice' + (state.voice === v.voice_id ? ' active' : '');
+    const em = document.createElement('span');
+    em.className = 'emoji';
+    em.textContent = v.emoji || '★';
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+    const nm = document.createElement('div');
+    nm.className = 'nm';
+    nm.textContent = v.name;
+    const pr = document.createElement('div');
+    pr.className = 'pr';
+    pr.textContent = (v.prompt || '').slice(0, 26) || '（无转录）';
+    info.append(nm, pr);
+    el.append(em, info);
+    el.onclick = ()=>{ state.voice = v.voice_id; renderVoices(); log(`选择音色：${v.name}`); };
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.type = 'button';
+    del.textContent = '×';
+    del.title = '删除这个音色';
+    del.onclick = async (ev)=>{
+      ev.stopPropagation();
+      if (!confirm(`删除音色「${v.name}」？参考音频会一起删掉。`)) return;
+      try{
+        await api('/api/voices/' + encodeURIComponent(v.voice_id), { method:'DELETE' });
+        if (state.voice === v.voice_id) state.voice = null;
+        log(`删除音色：${v.name}`);
+        await loadVoices();
+      }catch(err){ log('删除失败：' + err.message); }
+    };
+    el.appendChild(del);
+    box.appendChild(el);
   }
 }
 
@@ -223,7 +262,8 @@ function renderEmotions(){
   const box = document.getElementById('emotions');
   box.innerHTML = '';
   for (const e of EMOTIONS){
-    const el = document.createElement('div');
+    const el = document.createElement('button');
+    el.type = 'button';
     el.className = 'chip' + (state.emotion === e ? ' active' : '');
     el.textContent = e;
     el.onclick = ()=>{ state.emotion = e; renderEmotions(); };
@@ -236,13 +276,16 @@ async function generate(){
   const text = document.getElementById('text').value.trim();
   if (!text) return log('文本为空');
   const btn = document.getElementById('genBtn');
-  btn.disabled = true; btn.textContent = '生成中…';
+  btn.disabled = true;
   const t0 = performance.now();
+  const tick = setInterval(()=>{ btn.textContent = `生成中… ${Math.round((performance.now()-t0)/1000)}s`; }, 500);
+  btn.textContent = '生成中… 0s';
   try{
     const fd = new FormData();
     fd.append('voice_id', state.voice);
     fd.append('text', text);
     fd.append('emotion', state.emotion);
+    fd.append('mode', document.getElementById('mode').value);
     fd.append('speed', document.getElementById('speed').value);
     fd.append('quality', document.getElementById('quality').value);
     fd.append('best_n', document.getElementById('bestN').value);
@@ -253,6 +296,11 @@ async function generate(){
     audioUrl = URL.createObjectURL(new Blob([bytes], {type:'audio/wav'}));
     document.getElementById('player').src = audioUrl;
     document.getElementById('player').play().catch(()=>{});
+    const dl = document.getElementById('dl');
+    dl.href = audioUrl;
+    const vn = (state.voices.find(v=>v.voice_id === state.voice) || {}).name || state.voice;
+    dl.download = `${vn}_${state.emotion}_${Date.now()}.wav`;
+    dl.style.display = 'inline-block';
     document.getElementById('mSim').textContent = d.sim == null ? '—' : d.sim.toFixed(3);
     document.getElementById('mDur').textContent = d.duration == null ? '—' : d.duration.toFixed(2) + 's';
     document.getElementById('mLat').textContent = d.latency == null ? '—' : d.latency.toFixed(1) + 's';
@@ -261,6 +309,7 @@ async function generate(){
   }catch(err){
     log('合成失败：' + err.message);
   }finally{
+    clearInterval(tick);
     btn.disabled = false; btn.textContent = '生成语音';
   }
 }
@@ -270,14 +319,20 @@ async function createVoice(){
   const prompt = document.getElementById('newPrompt').value.trim();
   const file = document.getElementById('newFile').files[0];
   if (!name || !file) return log('需要名称 + 参考音频');
+  const btn = document.getElementById('createBtn');
   const fd = new FormData();
   fd.append('name', name); fd.append('prompt', prompt); fd.append('ref', file);
+  btn.disabled = true; btn.textContent = '上传中…';
   try{
     const d = await api('/api/voices', { method:'POST', body: fd });
     log(`新建音色：${d.name}`);
     state.voice = d.voice_id;
-    loadVoices();
+    document.getElementById('newName').value = '';
+    document.getElementById('newPrompt').value = '';
+    document.getElementById('newFile').value = '';
+    await loadVoices();
   }catch(err){ log('新建失败：' + err.message); }
+  finally{ btn.disabled = false; btn.textContent = '上传并建立音色'; }
 }
 
 async function runAudit(){
@@ -296,6 +351,22 @@ async function runAudit(){
 document.getElementById('speed').addEventListener('input', e=>{
   document.getElementById('speedVal').textContent = Number(e.target.value).toFixed(2);
 });
+
+const textEl = document.getElementById('text');
+function updateCharCount(){
+  document.getElementById('charCount').textContent = textEl.value.length + ' 字';
+}
+textEl.addEventListener('input', updateCharCount);
+textEl.addEventListener('keydown', e=>{
+  if (e.ctrlKey && e.key === 'Enter'){ e.preventDefault(); generate(); }
+});
+
+const qualityEl = document.getElementById('quality');
+const bestNEl = document.getElementById('bestN');
+function syncBestN(){ bestNEl.disabled = qualityEl.value !== 'best'; }
+qualityEl.addEventListener('change', syncBestN);
+syncBestN();
+updateCharCount();
 
 window.addEventListener('beforeunload', ()=>{ if (audioUrl) URL.revokeObjectURL(audioUrl); });
 

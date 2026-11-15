@@ -72,9 +72,10 @@ EMO_SVC = os.environ.get('EMOTION_BASE', 'http://127.0.0.1:50001')
 os.makedirs(VOICE_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-app = FastAPI(title='声刻 Studio', version='1.0.0')
+app = FastAPI(title='声刻 Studio', version='1.1.0')
 LOG = logging.getLogger('voicesculptor')
 _sess = None
+HTTP = requests.Session()
 
 
 # ------------------------------------------------------------
@@ -96,17 +97,21 @@ def campplus():
 # ------------------------------------------------------------
 # 把一段音频转成说话人向量（16k 重采样 + fbank + ONNX 推理）
 # ------------------------------------------------------------
-def embed(path):
-    wav, sr = sf.read(path, dtype='float32')
+def embed_array(wav, sr):
     if wav.ndim > 1:
         wav = wav.mean(axis=1)
-    t = torch.tensor(wav).unsqueeze(0)
+    t = torch.from_numpy(np.ascontiguousarray(wav, dtype=np.float32)).unsqueeze(0)
     if sr != 16000:
         t = torchaudio.functional.resample(t, sr, 16000)
     f = kaldi.fbank(t, num_mel_bins=80, sample_frequency=16000, dither=0)
     f = f - f.mean(dim=0, keepdim=True)
     s = campplus()
     return s.run(None, {s.get_inputs()[0].name: f.unsqueeze(0).numpy()})[0].flatten()
+
+
+def embed(path):
+    wav, sr = sf.read(path, dtype='float32')
+    return embed_array(wav, sr)
 
 
 # ------------------------------------------------------------
@@ -220,39 +225,74 @@ EMOTION_INSTRUCT = {
 
 
 # ------------------------------------------------------------
-# 调用一次 CosyVoice：instruct 非空走 instruct2，否则走 zero_shot
+# 引擎侧 zero_shot 说话人缓存：首次注册，之后直接按 spk_id 合成，
+# 省掉每次请求重复提取 speech token / fbank / 说话人向量的开销
 # ------------------------------------------------------------
-def synth_once(ref_path, prompt, text, instruct, speed=1.0):
+_REGISTERED = set()
+
+
+def _spk_id(ref_path):
+    vid = os.path.basename(os.path.dirname(ref_path))
+    return '%s_%d' % (vid, int(os.path.getmtime(ref_path)))
+
+
+def _register_spk(spk, ref_path, prompt):
     with open(ref_path, 'rb') as f:
         files = {'prompt_wav': ('p.wav', f.read(), 'application/octet-stream')}
+    data = {'spk_id': spk,
+            'prompt_text': 'You are a helpful assistant.<|endofprompt|>' + prompt}
+    r = HTTP.post(COSYVOICE + '/add_zero_shot_spk', data=data, files=files, timeout=120)
+    r.raise_for_status()
+    _REGISTERED.add(spk)
+
+
+# ------------------------------------------------------------
+# 调用一次 CosyVoice：instruct 非空走 instruct2，否则走 zero_shot（带说话人缓存）
+# ------------------------------------------------------------
+def synth_once(ref_path, prompt, text, instruct, speed=1.0):
     if instruct:
+        with open(ref_path, 'rb') as f:
+            files = {'prompt_wav': ('p.wav', f.read(), 'application/octet-stream')}
         data = {'tts_text': text, 'instruct_text': instruct + '<|endofprompt|>',
                 'speed': str(speed)}
-        url = COSYVOICE + '/inference_instruct2'
-    else:
-        data = {'tts_text': text,
-                'prompt_text': 'You are a helpful assistant.<|endofprompt|>' + prompt,
-                'speed': str(speed)}
-        url = COSYVOICE + '/inference_zero_shot'
-    r = requests.post(url, data=data, files=files, timeout=300)
+        r = HTTP.post(COSYVOICE + '/inference_instruct2', data=data, files=files, timeout=300)
+        r.raise_for_status()
+        return r.content
+    spk = _spk_id(ref_path)
+    if spk not in _REGISTERED:
+        _register_spk(spk, ref_path, prompt)
+    data = {'tts_text': text, 'spk_id': spk, 'speed': str(speed)}
+    r = HTTP.post(COSYVOICE + '/inference_zero_shot_spk', data=data, timeout=300)
+    if r.status_code == 404:  # 引擎重启过，说话人缓存丢了：重注册再试
+        _REGISTERED.discard(spk)
+        _register_spk(spk, ref_path, prompt)
+        r = HTTP.post(COSYVOICE + '/inference_zero_shot_spk', data=data, timeout=300)
     r.raise_for_status()
     return r.content
 
 
 # ------------------------------------------------------------
-# 对内存中的 PCM 直接算说话人向量（写临时 wav -> embed -> 删除）
+# 对内存中的 PCM 直接算说话人向量（不落盘）
 # ------------------------------------------------------------
 def _emb_bytes(pcm_bytes):
-    tmp = os.path.join(APP_DIR, '_probe_%s.wav' % uuid.uuid4().hex[:8])
-    with open(tmp, 'wb') as f:
-        f.write(wrap_wav(pcm_bytes, 24000))
-    try:
-        return embed(tmp)
-    finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+    return embed_array(np.frombuffer(pcm_bytes, dtype='<i2').astype(np.float32) / 32768.0, 24000)
+
+
+# ------------------------------------------------------------
+# 参考音频的 embedding 缓存：best 模式一次请求最多合成 7 条，参考向量只该算一次
+# ------------------------------------------------------------
+_REF_EMB = {}
+
+
+def ref_embedding(path):
+    key = (path, os.path.getmtime(path))
+    v = _REF_EMB.get(key)
+    if v is None:
+        v = embed(path)
+        if len(_REF_EMB) > 64:
+            _REF_EMB.clear()
+        _REF_EMB[key] = v
+    return v
 
 
 # --------------------------------------------------------------------
@@ -260,9 +300,6 @@ def _emb_bytes(pcm_bytes):
 # 作用: 首页：直接返回 static/index.html
 # --------------------------------------------------------------------
 @app.get('/')
-# ------------------------------------------------------------
-# 首页：直接返回 static/index.html
-# ------------------------------------------------------------
 def index():
     return FileResponse(os.path.join(STATIC_DIR, 'index.html'))
 
@@ -275,7 +312,7 @@ def index():
 def health():
     engines = {}
     try:
-        engines['cosyvoice'] = requests.get(COSYVOICE + '/docs', timeout=2).status_code < 500
+        engines['cosyvoice'] = HTTP.get(COSYVOICE + '/health', timeout=2).ok
     except Exception:
         engines['cosyvoice'] = False
     # 评测模型是本应用的硬依赖，单独上报，前端可直接看出模型目录是否正确
@@ -288,9 +325,6 @@ def health():
 # 作用: 接口：返回全部音色
 # --------------------------------------------------------------------
 @app.get('/api/voices')
-# ------------------------------------------------------------
-# 接口：返回全部音色
-# ------------------------------------------------------------
 def get_voices():
     return {'voices': list_voices()}
 
@@ -333,9 +367,6 @@ async def create_voice(name: str = Form(...), prompt: str = Form(''),
 # 作用: 接口：删除音色（连同参考音频）
 # --------------------------------------------------------------------
 @app.delete('/api/voices/{vid}')
-# ------------------------------------------------------------
-# 接口：删除音色（连同参考音频）
-# ------------------------------------------------------------
 def delete_voice(vid: str):
     d = _voice_dir(vid)
     if not os.path.isdir(d):
@@ -343,6 +374,8 @@ def delete_voice(vid: str):
     shutil.rmtree(d, ignore_errors=True)
     if os.path.isdir(d):
         raise HTTPException(500, '删除失败：目录仍被占用，请关闭占用的程序后重试')
+    for k in [k for k in _REF_EMB if k[0].startswith(d + os.sep)]:
+        _REF_EMB.pop(k, None)
     return {'ok': True}
 
 
@@ -351,9 +384,6 @@ def delete_voice(vid: str):
 # 作用: 接口：合成语音。流程见函数体内的分步注释
 # --------------------------------------------------------------------
 @app.post('/api/tts')
-# ------------------------------------------------------------
-# 接口：合成语音。流程见函数体内的分步注释
-# ------------------------------------------------------------
 def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('平静'),
         mode: str = Form('auto'), speed: float = Form(1.0), quality: str = Form('balanced'),
         best_n: int = Form(2), verify: bool = Form(True)):
@@ -363,6 +393,11 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         raise HTTPException(422, '文本为空')
     # 评测模型缺失时尽早失败，避免先等一次完整合成
     campplus()
+    # 参数白名单：非法值早点 422，别等合成完才发现
+    if mode not in ('auto', 'zero_shot', 'instruct2'):
+        raise HTTPException(422, 'mode 只能是 auto/zero_shot/instruct2')
+    if quality not in ('balanced', 'best'):
+        raise HTTPException(422, 'quality 只能是 balanced/best')
     # 语速只接受 0.5~2.0，防止引擎收到离谱的值
     speed = max(0.5, min(2.0, float(speed)))
 
@@ -422,7 +457,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     # 5) 质量模式：best 会额外生成 n-1 条，按相似度择优；balanced 只做一次
     n = max(1, min(4, int(best_n))) if quality == 'best' else 1
     try:
-        ref_emb = embed(ref)
+        ref_emb = ref_embedding(ref)
     except HTTPException:
         raise
     except Exception as e:
@@ -449,8 +484,8 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     detected = None
     if verify:
         try:
-            r = requests.post(EMO_SVC + '/emotion',
-                              files={'file': ('a.wav', wav, 'audio/wav')}, timeout=60)
+            r = HTTP.post(EMO_SVC + '/emotion',
+                          files={'file': ('a.wav', wav, 'audio/wav')}, timeout=60)
             if r.ok:
                 detected = r.json().get('cn')
         except Exception as e:
@@ -545,9 +580,6 @@ def audit_folder(dir_path):
 # 作用: 接口：对指定目录做体检，返回 markdown 报告
 # --------------------------------------------------------------------
 @app.post('/api/audit')
-# ------------------------------------------------------------
-# 接口：对指定目录做体检，返回 markdown 报告
-# ------------------------------------------------------------
 def audit(dir_path: str = Form(...)):
     if not os.path.isdir(dir_path):
         raise HTTPException(422, '目录不存在: ' + dir_path)

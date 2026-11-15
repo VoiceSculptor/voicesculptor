@@ -19,6 +19,8 @@ if not exist "%LOG%" mkdir "%LOG%"
 set "PYTHONUTF8=1"
 set "PYTHONPATH=%ENG%"
 set "PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128"
+set "FP16_ARG="
+if "%COSYVOICE_FP16%"=="1" set "FP16_ARG=--fp16"
 
 if exist "%LOG%\engine.failed" del /q "%LOG%\engine.failed"
 echo.==== %date% %time% 引擎启动（uv）==== >> "%LOG%\engine.log"
@@ -37,7 +39,7 @@ if errorlevel 1 (
   exit /b 1
 )
 echo ---- uv run server.py ---- >> "%LOG%\engine.log"
-uv run python -u -X faulthandler runtime\python\fastapi\server.py --port 50000 --model_dir "%MODEL%" >> "%LOG%\engine.log" 2>&1
+uv run python -u -X faulthandler runtime\python\fastapi\server.py --port 50000 --model_dir "%MODEL%" %FP16_ARG% >> "%LOG%\engine.log" 2>&1
 set "CODE=%errorlevel%"
 if not "%CODE%"=="0" > "%LOG%\engine.failed" echo exit-%CODE%
 echo. >> "%LOG%\engine.log"
