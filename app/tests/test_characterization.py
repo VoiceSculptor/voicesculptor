@@ -9,10 +9,12 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-import app as legacy
+from voicesculptor import config
+from voicesculptor import main as app_main
 
-client = TestClient(legacy.app, raise_server_exceptions=False)
-MODEL_ONNX = os.path.join(legacy.MODEL_DIR, 'campplus.onnx')
+SETTINGS = config.Settings.from_env()
+client = TestClient(app_main.create_app(), raise_server_exceptions=False)
+MODEL_ONNX = SETTINGS.campplus_path
 HAS_MODEL = os.path.isfile(MODEL_ONNX)
 
 
@@ -65,9 +67,9 @@ def test_voices_list_shape():
     assert isinstance(voices, list)
     for meta in voices:
         assert 'voice_id' in meta
-        assert os.path.isdir(os.path.join(legacy.VOICE_DIR, meta['voice_id']))
+        assert os.path.isdir(os.path.join(SETTINGS.voice_dir, meta['voice_id']))
         assert os.path.isfile(
-            os.path.join(legacy.VOICE_DIR, meta['voice_id'], 'ref.wav'))
+            os.path.join(SETTINGS.voice_dir, meta['voice_id'], 'ref.wav'))
 
 
 def test_create_and_delete_voice():
@@ -106,7 +108,7 @@ def test_tts_text_too_long_422(sample_voice):
     resp = client.post('/api/tts',
                        data={
                            'voice_id': sample_voice['voice_id'],
-                           'text': '啊' * (legacy.MAX_TEXT_CHARS + 1),
+                           'text': '啊' * (SETTINGS.max_text_chars + 1),
                            'mode': 'zero_shot',
                        })
     assert resp.status_code == 422
