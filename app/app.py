@@ -46,6 +46,7 @@ import os
 import re
 import shutil
 import struct
+import threading
 import time
 import uuid
 
@@ -75,6 +76,8 @@ EMOTION_RANK = os.environ.get('VS_EMOTION_RANK', '0') == '1'
 MAX_TEXT_CHARS = int(os.environ.get('VS_MAX_TEXT_CHARS', '500'))
 MAX_SYNTH_PER_REQ = int(os.environ.get('VS_MAX_SYNTH_PER_REQ', '5'))
 MIN_PCM_BYTES = 2400  # 0.05 s @ 24kHz int16；少于此视为引擎返回空音频
+TTS_GATE = threading.BoundedSemaphore(int(os.environ.get('VS_TTS_CONCURRENCY', '1')))
+TTS_QUEUE_TIMEOUT = float(os.environ.get('VS_TTS_QUEUE_TIMEOUT', '120'))
 
 
 class EngineEmpty(Exception):
@@ -176,9 +179,10 @@ def _load_meta(d, vid):
     if not os.path.isfile(mp):
         return None
     try:
-        with open(mp, encoding='utf-8') as f:
+        with open(mp, encoding='utf-8-sig') as f:
             meta = json.load(f)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
+        LOG.warning('音色 %s 的 meta.json 读取失败: %s', vid, e)
         return None
     if not isinstance(meta, dict) or meta.get('voice_id') != vid:
         return None
@@ -188,9 +192,21 @@ def _load_meta(d, vid):
 def list_voices():
     out = []
     for vid in sorted(os.listdir(VOICE_DIR)):
-        meta = _load_meta(os.path.join(VOICE_DIR, vid), vid)
-        if meta is not None:
+        d = os.path.join(VOICE_DIR, vid)
+        meta = _load_meta(d, vid)
+        if meta is not None and os.path.isfile(os.path.join(d, 'ref.wav')):
             out.append(meta)
+    return out
+
+
+def broken_voices():
+    """meta.json 有效但缺少 ref.wav 的音色 id（列表不展示，但健康检查要报出来）"""
+    out = []
+    for vid in sorted(os.listdir(VOICE_DIR)):
+        d = os.path.join(VOICE_DIR, vid)
+        meta = _load_meta(d, vid)
+        if meta is not None and not os.path.isfile(os.path.join(d, 'ref.wav')):
+            out.append(vid)
     return out
 
 
@@ -264,7 +280,8 @@ def seed_defaults():
     ]
     for vid, name, ref, prompt in defaults:
         d = os.path.join(VOICE_DIR, vid)
-        if os.path.exists(os.path.join(d, 'meta.json')) or not os.path.exists(ref):
+        if ((os.path.exists(os.path.join(d, 'meta.json')) and os.path.exists(os.path.join(d, 'ref.wav')))
+                or not os.path.exists(ref)):
             continue
         os.makedirs(d, exist_ok=True)
         w, s = sf.read(ref, dtype='float32')
@@ -457,7 +474,7 @@ def health():
     except Exception:
         emo = False
     return {'ok': all(engines.values()), 'engines': engines, 'emotion': emo,
-            'voices': len(list_voices())}
+            'voices': len(list_voices()), 'broken_voices': broken_voices()}
 
 
 # --------------------------------------------------------------------
@@ -485,10 +502,13 @@ async def create_voice(name: str = Form(...), prompt: str = Form(''),
         raise HTTPException(422, '无法识别的音频文件，请上传 wav/mp3/m4a/flac/ogg')
     if wav.ndim > 1:
         wav = wav.mean(axis=1)
+    src_dur = len(wav) / float(sr or 1)
+    if not 0.5 <= src_dur <= 30:
+        raise HTTPException(422, '参考音频时长需在 0.5~30 秒（当前 %.2f 秒）' % src_dur)
     wav = preprocess_ref(wav, sr)
-    dur = len(wav) / float(sr or 1)
-    if not 0.5 <= dur <= 30:
-        raise HTTPException(422, '参考音频时长需在 0.5~30 秒（当前 %.1f 秒）' % dur)
+    dur = len(wav) / float(sr or 1) - 0.2  # 去掉 preprocess_ref 尾部补的 0.2s 静音
+    if dur < 0.3:
+        raise HTTPException(422, '参考音频有效语音过短（去静音后 %.2f 秒）' % dur)
     if emotion not in EMOTION_INSTRUCT:
         raise HTTPException(422, 'emotion 只能是: ' + '/'.join(EMOTION_INSTRUCT))
     group = group.strip()
@@ -543,6 +563,19 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         mode: str = Form('auto'), speed: float = Form(1.0), quality: str = Form('balanced'),
         best_n: int = Form(2), verify: bool = Form(True), instruct_text: str = Form(''),
         emo_voice_id: str = Form('')):
+    if not TTS_GATE.acquire(timeout=TTS_QUEUE_TIMEOUT):
+        raise HTTPException(429, '合成繁忙：前面还有任务在排队，请稍后重试')
+    try:
+        return _tts_impl(voice_id, text, emotion, mode, speed, quality, best_n, verify,
+                         instruct_text, emo_voice_id)
+    finally:
+        TTS_GATE.release()
+
+
+def _tts_impl(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('平静'),
+              mode: str = Form('auto'), speed: float = Form(1.0), quality: str = Form('balanced'),
+              best_n: int = Form(2), verify: bool = Form(True), instruct_text: str = Form(''),
+              emo_voice_id: str = Form('')):
     # 1) 定位音色：拿到参考音频与转录文本
     meta, ref = voice_paths(voice_id)
     if not text.strip():
@@ -807,12 +840,15 @@ def audit(dir_path: str = Form(...)):
     if not os.path.isdir(dir_path):
         raise HTTPException(422, '目录不存在: ' + dir_path)
     report, summary = audit_folder(dir_path)
+    report_dir = os.path.join(QA, 'logs')
+    os.makedirs(report_dir, exist_ok=True)
+    report_path = os.path.join(report_dir, 'audit-report.md')
     try:
-        with open(os.path.join(APP_DIR, 'audit-report.md'), 'w', encoding='utf-8') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
     except OSError as e:
         raise HTTPException(500, '报告写入失败: ' + str(e))
-    return {'ok': True, 'report': report, 'summary': summary}
+    return {'ok': True, 'report': report, 'summary': summary, 'report_path': report_path}
 
 
 if __name__ == '__main__':
