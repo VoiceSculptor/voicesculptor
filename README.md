@@ -28,6 +28,8 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 
 双击 `启动-声刻.cmd`。首次运行会自动 `uv sync`，下载 CUDA 版 torch 等约 4GB 依赖，可能需要 10 分钟以上；脚本在引擎/应用就绪后会自动打开 http://127.0.0.1:8091（也可以手动访问）。
 
+仓库中的 `.cmd`/`.bat` 文件统一为 **ASCII 内容 + CRLF 换行**，不依赖 Windows 的系统区域或控制台代码页，也能兼容常见的 ASCII 兼容编码。修改启动脚本时不要加入中文或其他非 ASCII 字符；中文文档和 Python 源码使用 UTF-8。Git 会按 `.gitattributes` 处理批处理文件的换行。
+
 模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录（启动器、引擎启动脚本、应用都会读取）。
 
 想再快一点可设置 `COSYVOICE_FP16=1` 后启动引擎（fp16 推理，仅 CUDA 生效，显存占用更低；个别显卡音质可能有轻微波动，默认关闭）。
@@ -59,7 +61,7 @@ logs/               运行日志
 
 ## 出问题
 
-双击 `诊断.cmd`，把 `logs\诊断报告.txt` 发回。
+双击 `诊断.cmd`，把 `logs\diagnostic-report.txt` 发回。
 
 ## 说明
 

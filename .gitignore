@@ -3,7 +3,7 @@
 /app/voices/
 /logs/
 /app/_probe*.wav
-/日志包.zip
+/logs_bundle.zip
 __pycache__/
 *.pyc
 *.bak

@@ -6,7 +6,8 @@
     GET  /health   -> {"ok":true,"model":...,"device":...,"loaded":true}
     POST /emotion  form 字段 file=<音频> -> {"label":英文类别,"cn":中文标签或null,
                                              "scores":{英文:分数},"cn_scores":{中文:分数}}
-  被 app/app.py 的 detect_emotion() 调用；cn 必须和 app 的 EMOTION_INSTRUCT 键一致。
+  被 app/app.py 的 detect_emotion() 调用；cn 永不为 null；仅 angry/happy/neutral/sad/surprised
+  与 app 的 EMOTION_INSTRUCT 键一致，其余类别只用于展示。
   环境变量: EMOTION_MODEL（默认 iic/emotion2vec_plus_large）、EMOTION_DEVICE（默认 cpu）
 """
 import argparse
@@ -24,7 +25,21 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 
 MODEL_ID = os.environ.get('EMOTION_MODEL', 'iic/emotion2vec_plus_large')
 DEVICE = os.environ.get('EMOTION_DEVICE', 'cpu')
-EN2CN = {'angry': '生气', 'happy': '开心', 'neutral': '平静', 'sad': '难过', 'surprised': '惊讶'}
+# emotion2vec_plus 9 类；只有前 5 类与 app 的 EMOTION_INSTRUCT 键对应，其余只用于展示
+EN2CN = {'angry': '生气', 'happy': '开心', 'neutral': '平静', 'sad': '难过', 'surprised': '惊讶',
+         'disgusted': '厌恶', 'fearful': '恐惧', 'other': '其他', 'unknown': '未知'}
+SILENCE_RMS = 10 ** (-50 / 20)  # 约 -50 dBFS，低于此值视为静音，不送模型
+
+
+def _norm_label(lab):
+    """'生气/angry' -> 'angry'；'<unk>' -> 'unknown'；统一小写"""
+    s = str(lab).split('/')[-1].strip().lower()
+    return 'unknown' if s in ('<unk>', 'unk', '') else s
+
+
+def _cn(label):
+    """已知类别返回中文；未知类别原样返回英文，永不返回 None"""
+    return EN2CN.get(label, label)
 
 app = FastAPI(title='voicesculptor-emotion', version='0.1.0')
 LOG = logging.getLogger('emotion')
@@ -63,7 +78,7 @@ def classify(wav, sr):
             pass
     scores = {}
     for lab, s in zip(res['labels'], res['scores']):
-        scores[str(lab).split('/')[-1]] = round(float(s), 4)
+        scores[_norm_label(lab)] = round(float(s), 4)
     top = max(scores, key=scores.get)
     return top, scores
 
@@ -86,9 +101,12 @@ def emotion(file: UploadFile = File(...)):
         raise HTTPException(422, '无法识别的音频文件')
     if len(wav) < 0.3 * sr:
         raise HTTPException(422, '音频短于 0.3 秒')
+    mono = wav.mean(axis=1) if wav.ndim > 1 else wav
+    if float(np.sqrt(np.mean(np.square(mono)))) < SILENCE_RMS:
+        return {'label': 'unknown', 'cn': _cn('unknown'), 'scores': {}, 'cn_scores': {}, 'reason': 'silence'}
     top, scores = classify(wav, sr)
-    return {'label': top, 'cn': EN2CN.get(top), 'scores': scores,
-            'cn_scores': {EN2CN[k]: v for k, v in scores.items() if k in EN2CN}}
+    return {'label': top, 'cn': _cn(top), 'scores': scores,
+            'cn_scores': {_cn(k): v for k, v in scores.items()}}
 
 
 if __name__ == '__main__':

@@ -95,7 +95,7 @@
   <!-- 中：合成 -->
   <div class="panel">
     <h2>合成</h2>
-    <textarea id="text" placeholder="输入要合成的文本…">欢迎来到声刻，今天也请多关照。</textarea>
+    <textarea id="text" maxlength="500" placeholder="输入要合成的文本…">欢迎来到声刻，今天也请多关照。</textarea>
     <div class="row" style="margin-top:4px"><span class="hint" id="charCount">0 字</span></div>
     <div class="row"><label>情绪</label><div class="chips" id="emotions"></div></div>
     <div class="row">
@@ -118,7 +118,7 @@
       </select>
       <label style="min-width:52px">候选</label>
       <input type="number" id="bestN" min="1" max="4" value="2" style="width:64px">
-      <label style="min-width:52px">校验</label>
+      <label style="min-width:52px">校验（beta）</label>
       <input type="checkbox" id="verify">
     </div>
     <div class="row"><span class="hint">zero_shot 只复刻参考音色，选情绪不会生效；auto 会按情绪自动切到 instruct2。</span></div>
@@ -281,6 +281,7 @@ async function generate(){
   if (!state.voice) return log('请先选择一个音色');
   const text = document.getElementById('text').value.trim();
   if (!text) return log('文本为空');
+  if (text.length > 500) return log('文本过长：最多 500 字（当前 ' + text.length + ' 字）');
   const btn = document.getElementById('genBtn');
   btn.disabled = true;
   const t0 = performance.now();
@@ -310,7 +311,7 @@ async function generate(){
     document.getElementById('mSim').textContent = d.sim == null ? '—' : d.sim.toFixed(3);
     document.getElementById('mDur').textContent = d.duration == null ? '—' : d.duration.toFixed(2) + 's';
     document.getElementById('mLat').textContent = d.latency == null ? '—' : d.latency.toFixed(1) + 's';
-    document.getElementById('mEmo').textContent = (d.emotion_detected || '—') + (d.emotion_detected === d.emotion_target ? ' ✓' : '');
+    document.getElementById('mEmo').textContent = d.emotion_detected ? (d.emotion_detected + (d.emotion_detected === d.emotion_target ? ' ✓' : '') + '（beta）') : '—';
     log(`合成完成 · ${d.engine}/${d.mode} · SIM=${d.sim} · ${d.duration}s · 候选${d.candidates}${d.ref_voice ? ' · 参考=' + d.ref_voice : ''}`);
   }catch(err){
     log('合成失败：' + err.message);

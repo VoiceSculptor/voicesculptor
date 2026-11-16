@@ -65,10 +65,21 @@ STATIC_DIR = os.path.join(APP_DIR, 'static')
 QA = os.path.dirname(APP_DIR)
 ROXY_SEL = os.path.join(QA, 'runtime', 'roxy-refs-selected')
 ROXY_ORIG = os.path.join(QA, 'runtime', 'roxy-emotions-orig')
-MODEL_DIR = os.environ.get('COSYVOICE_MODEL_DIR') or os.path.join(
+MODEL_DIR = (os.environ.get('COSYVOICE_MODEL_DIR') or '').strip().strip('"').rstrip('\\/') or os.path.join(
     QA, 'engine', 'CosyVoice', 'pretrained_models', 'Fun-CosyVoice3-0.5B')
 COSYVOICE = os.environ.get('COSYVOICE_BASE', 'http://127.0.0.1:50000')
 EMO_SVC = os.environ.get('EMOTION_BASE', 'http://127.0.0.1:50001')
+
+# 情绪模型当前不可信（见 QA P1-1）：默认不让情绪识别参与 best 择优，设 VS_EMOTION_RANK=1 才恢复
+EMOTION_RANK = os.environ.get('VS_EMOTION_RANK', '0') == '1'
+MAX_TEXT_CHARS = int(os.environ.get('VS_MAX_TEXT_CHARS', '500'))
+MAX_SYNTH_PER_REQ = int(os.environ.get('VS_MAX_SYNTH_PER_REQ', '5'))
+MIN_PCM_BYTES = 2400  # 0.05 s @ 24kHz int16；少于此视为引擎返回空音频
+
+
+class EngineEmpty(Exception):
+    """引擎返回空/近空音频"""
+
 
 os.makedirs(VOICE_DIR, exist_ok=True)
 os.makedirs(STATIC_DIR, exist_ok=True)
@@ -536,6 +547,8 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     meta, ref = voice_paths(voice_id)
     if not text.strip():
         raise HTTPException(422, '文本为空')
+    if len(text.strip()) > MAX_TEXT_CHARS:
+        raise HTTPException(422, '文本过长：最多 %d 字（当前 %d 字）' % (MAX_TEXT_CHARS, len(text.strip())))
     # 评测模型缺失时尽早失败，避免先等一次完整合成
     campplus()
     # 参数白名单：非法值早点 422，别等合成完才发现
@@ -581,13 +594,25 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     if kind == 'zero_shot' and not prompt:
         kind = 'cross_lingual'
 
+    calls = [0]
+
     def _synth(k, instr):
-        return synth_once(k, ref_path, prompt, text, instr, speed, emo_ref=emo_ref, emo_prompt=emo_prompt)
+        if calls[0] >= MAX_SYNTH_PER_REQ:
+            raise RuntimeError('已达单请求合成次数上限 %d' % MAX_SYNTH_PER_REQ)
+        calls[0] += 1
+        b = synth_once(k, ref_path, prompt, text, instr, speed, emo_ref=emo_ref, emo_prompt=emo_prompt)
+        b = b[:len(b) // 2 * 2]  # 奇数字节会让 np.frombuffer('<i2') 抛错
+        if len(b) < MIN_PCM_BYTES:
+            raise EngineEmpty('引擎返回空音频（%d 字节）' % len(b))
+        return b
 
     # 3) 第一次合成（失败直接 503，让前端提示引擎不可用）
     t0 = time.time()
     try:
         pcm = _synth(kind, instruct)
+    except EngineEmpty as e:
+        LOG.error('首次合成返回空音频: %s', e)
+        raise HTTPException(502, '合成失败：' + str(e))
     except Exception as e:
         LOG.exception('首次合成失败')
         raise HTTPException(503, '合成失败: ' + str(e))
@@ -602,7 +627,8 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
 
     expected = max(0.8, len(text.strip()) / 5.8)
     tries = 0
-    while (_dur(pcm) < expected * 0.55 or _dur(pcm) > expected * 2.5) and tries < 2:
+    while ((_dur(pcm) < expected * 0.55 or _dur(pcm) > expected * 2.5) and tries < 2
+           and calls[0] < MAX_SYNTH_PER_REQ):
         tries += 1
         try:
             alt = _synth(kind, instruct)
@@ -619,7 +645,8 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         except Exception as e:
             LOG.warning('时长重试失败: %s', e)
 
-    if _dur(pcm) < expected * 0.55 and kind in ('zero_shot', 'cross_lingual') and emotion_prompt:
+    if (_dur(pcm) < expected * 0.55 and kind in ('zero_shot', 'cross_lingual') and emotion_prompt
+            and calls[0] < MAX_SYNTH_PER_REQ):
         try:
             alt = _synth('instruct2', emotion_prompt)
             if _dur(alt) > _dur(pcm):
@@ -640,10 +667,13 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         raise HTTPException(503, '评测模型加载失败: ' + str(e))
     cands = [pcm]
     for _ in range(n - 1):
+        if calls[0] >= MAX_SYNTH_PER_REQ:
+            break
         try:
             cands.append(_synth(kind, instruct))
         except Exception as e:
             LOG.warning('候选生成失败: %s', e)
+    use_emo_rank = verify and EMOTION_RANK and len(cands) > 1
     scored = []
     for c in cands:
         try:
@@ -651,9 +681,9 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         except Exception as e:
             LOG.warning('相似度计算失败: %s', e)
             s = None
-        det = detect_emotion(wrap_wav(c, 24000)) if (verify and len(cands) > 1) else None
+        det = detect_emotion(wrap_wav(c, 24000)) if use_emo_rank else None
         scored.append({'pcm': c, 'sim': s, 'expr': prosody(c), 'det': det})
-    if verify and len(scored) > 1 and emotion in AROUSAL:
+    if use_emo_rank and emotion in AROUSAL:
         sign = AROUSAL[emotion]
         z_rng = _z([x['expr'][0] for x in scored])
         z_rms = _z([x['expr'][1] for x in scored])
@@ -663,8 +693,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     else:
         for x in scored:
             x['rank'] = -2.0 if x['sim'] is None else x['sim']
-    # verify 且有多条候选时再用情绪判定校正：命中目标情绪加分，音色明显漂移的候选重罚
-    if verify and len(scored) > 1:
+    if use_emo_rank:
         sims = [x['sim'] for x in scored if x['sim'] is not None]
         top = max(sims) if sims else None
         for x in scored:
@@ -672,14 +701,14 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
                 x['rank'] += 1.0
             if top is not None and x['sim'] is not None and x['sim'] < top - 0.05:
                 x['rank'] -= 10.0
+    if not scored or len(max(scored, key=lambda x: x['rank'])['pcm']) < MIN_PCM_BYTES:
+        raise HTTPException(502, '合成失败：引擎返回空音频')
     best = max(scored, key=lambda x: x['rank'])
     best_pcm, best_s = best['pcm'], best['sim']
-
-    # 6) 包装成 WAV，并计算时长
     wav = wrap_wav(best_pcm, 24000)
     duration = len(best_pcm) / 2 / 24000
-    # 7) 可选：让情绪服务判断实际情绪（多候选时命中的候选已带上 det，避免重复调用）
-    detected = best['det'] if (verify and len(scored) > 1) else (detect_emotion(wav) if verify else None)
+    # verify 只决定是否展示情绪结果；是否参与择优由 EMOTION_RANK 决定
+    detected = best['det'] if use_emo_rank else (detect_emotion(wav) if verify else None)
 
     return JSONResponse({
         'audio_base64': base64.b64encode(wav).decode('ascii'),
@@ -692,7 +721,9 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         'emo_voice': emo_voice_id if kind == 'split' else None,
         'emotion_target': emotion,
         'emotion_detected': detected,
-        'candidates': n,
+        'emotion_rank': use_emo_rank,
+        'candidates': len(cands),
+        'candidates_requested': n,
     })
 
 

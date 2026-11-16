@@ -1,5 +1,5 @@
-# Windows 批处理脚本对换行非常敏感：必须是 CRLF，否则 cmd.exe 解析错乱
-# （本仓库 .cmd 均为 UTF-8 编码 + CRLF，首行 chcp 65001 切换代码页）
+# Windows cmd.exe batch sources are ASCII-only so they work with any active code page.
+# Keep CRLF in the working tree; Git normalizes these files in the repository.
 *.cmd    text eol=crlf
 *.bat    text eol=crlf
 

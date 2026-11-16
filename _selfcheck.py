@@ -2,6 +2,12 @@
 """绿色版自检：输出 Python / Torch / CUDA / 关键包状态（由 诊断.cmd 调用）"""
 import sys
 
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 print("Python:", sys.version.replace("\n", " "))
 
 try:
