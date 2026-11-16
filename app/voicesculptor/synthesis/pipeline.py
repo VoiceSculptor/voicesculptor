@@ -95,7 +95,7 @@ class SynthesisPipeline:
             raise EngineEmptyError('合成失败：引擎返回空音频')
         final_wav = wav.wrap_wav(best.pcm)
         detected = best.det if use_emotion_rank else None
-        scores = None
+        scores = best.scores if use_emotion_rank else None
         if request.verify and not use_emotion_rank:
             detected, scores = self._verify_final(final_wav, warnings)
         return self._response(best, final_wav, plan, request, requested,
@@ -205,15 +205,33 @@ class SynthesisPipeline:
                     LOG.warning('相似度计算失败: %s', exc)
                     warnings.append('相似度计算失败: ' + str(exc))
             det = None
+            scores = None
             if use_emotion_rank:
-                det = self._emotion_client.detect_label(wav.wrap_wav(pcm))
+                det, scores = self._detect(pcm)
                 if det is None:
                     emotion_down = True
             candidates.append(
-                Candidate(pcm=pcm, sim=sim, expr=prosody.prosody(pcm), det=det))
+                Candidate(pcm=pcm,
+                          sim=sim,
+                          expr=prosody.prosody(pcm),
+                          det=det,
+                          scores=scores))
         if emotion_down:
             warnings.append('情绪服务不可用，已跳过情绪择优')
         return candidates, use_emotion_rank
+
+    def _detect(self, pcm: bytes) -> tuple[str | None, dict | None]:
+        """识别单段候选的情绪标签与分数；失败时返回 (None, None)。"""
+        try:
+            payload = self._emotion_client.classify(wav.wrap_wav(pcm))
+        except VoiceSculptorError as exc:
+            LOG.info('情绪识别失败: %s', exc)
+            return None, None
+        detected = payload.get('cn')
+        scores = payload.get('cn_scores')
+        if not isinstance(scores, dict) or not scores:
+            scores = None
+        return (str(detected) if detected else None), scores
 
     def _verify_final(self, final_wav: bytes,
                       warnings: list[str]) -> tuple[str | None, dict | None]:

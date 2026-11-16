@@ -23,6 +23,7 @@ class Candidate:
     expr: tuple[float, float]
     det: str | None
     rank: float = DEFAULT_RANK
+    scores: dict | None = None
 
 
 def rank_candidates(candidates: list[Candidate], emotion: str,
