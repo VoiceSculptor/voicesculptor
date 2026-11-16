@@ -27,13 +27,10 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-for %%F in ("llm.pt" "flow.pt" "hift.pt" "campplus.onnx" "speech_tokenizer_v3.onnx" "CosyVoice-BlankEN\model.safetensors") do (
-  if not exist "%MODEL%\%%~F" (
-    echo [ERROR] Missing model file: "%MODEL%\%%~F"
-    echo Download the model files from the GitHub release.
-    pause
-    exit /b 1
-  )
+call :ensure_models
+if errorlevel 1 (
+  pause
+  exit /b 1
 )
 
 set "VS_URL=http://127.0.0.1:%EPORT%/health"
@@ -174,6 +171,40 @@ echo   Keep the engine and app windows open while using Studio.
 echo ============================================
 echo.
 pause
+exit /b 0
+
+rem ---- :ensure_models downloads the Fun-CosyVoice3 weights on first start
+:ensure_models
+set "VS_MISSING="
+for %%F in ("llm.pt" "flow.pt" "hift.pt" "campplus.onnx" "speech_tokenizer_v3.onnx" "CosyVoice-BlankEN\model.safetensors") do (
+  if not exist "%MODEL%\%%~F" set "VS_MISSING=1"
+)
+if not defined VS_MISSING exit /b 0
+echo [INFO] Model weights are missing in "%MODEL%".
+echo [INFO] First start will download about 5.1 GB.
+echo [INFO] Sources: ModelScope (CN), hf-mirror, HuggingFace.
+echo [INFO] Override with VS_MODEL_SOURCE=modelscope / hf-mirror / huggingface.
+if /I "%VS_NO_MODEL_DOWNLOAD%"=="1" (
+  echo [ERROR] Automatic model download is disabled by VS_NO_MODEL_DOWNLOAD=1.
+  exit /b 1
+)
+set "PYTHONUTF8=1"
+uv run --no-project --python 3.11 python "%ROOT%download_models.py" --dest "%MODEL%"
+if errorlevel 1 (
+  echo [ERROR] Model download failed.
+  echo         Try VS_MODEL_SOURCE=modelscope / hf-mirror / huggingface,
+  echo         or put the weights in "%MODEL%" and retry.
+  exit /b 1
+)
+set "VS_MISSING="
+for %%F in ("llm.pt" "flow.pt" "hift.pt" "campplus.onnx" "speech_tokenizer_v3.onnx" "CosyVoice-BlankEN\model.safetensors") do (
+  if not exist "%MODEL%\%%~F" set "VS_MISSING=1"
+)
+if defined VS_MISSING (
+  echo [ERROR] Model files are still incomplete after download.
+  exit /b 1
+)
+echo [INFO] Model weights are ready.
 exit /b 0
 
 rem ---- :probe  uses VS_URL / VS_KEY / VS_TMO; errorlevel 0 = HTTP 200 and body contains VS_KEY

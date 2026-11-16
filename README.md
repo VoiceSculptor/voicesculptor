@@ -1,13 +1,13 @@
 # 声刻 Studio
 
-> 本地语音克隆 / 情感 TTS（CosyVoice3 + CAM++ 评测）。依赖由 **uv** 管理，模型权重单独分发。
+> 本地语音克隆 / 情感 TTS（CosyVoice3 + CAM++ 评测）。依赖由 **uv** 管理，模型权重首次启动自动下载。
 
 ## 环境要求
 
 - Windows 10/11 64 位
 - NVIDIA 独显，显存 ≥ 8GB；驱动 ≥ 570（CUDA 12.8）
 - 已安装 [uv](https://docs.astral.sh/uv/)：`winget install astral-sh.uv`
-- Python 3.11（uv 会按 `.python-version` 自动下载；不要用 3.12+，`pyworld` 没有对应轮子）
+- Python 3.11（uv 会自动准备；不要用 3.12+，`pyworld` 没有对应轮子）
 
 ## 安装
 
@@ -16,7 +16,7 @@ git clone --recurse-submodules https://github.com/VoiceSculptor/voicesculptor.gi
 cd voicesculptor
 ```
 
-从 GitHub Release 下载 6 个权重文件，放到：
+首次双击 `启动-声刻.cmd` 时会自动下载 6 个权重文件（约 5.1 GB），默认放到：
 
 ```
 engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
@@ -24,13 +24,23 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 └─ CosyVoice-BlankEN/model.safetensors
 ```
 
+下载源按 **ModelScope → hf-mirror → HuggingFace** 顺序自动尝试：国内一般走 ModelScope，海外可用 HuggingFace。也可以手动指定：
+
+```bat
+set VS_MODEL_SOURCE=modelscope
+set VS_MODEL_SOURCE=hf-mirror
+set VS_MODEL_SOURCE=huggingface
+```
+
+下载支持断点续传（`.part` 文件），完成后会校验文件大小和 SHA-256。
+
 ## 运行
 
-双击 `启动-声刻.cmd`。首次运行会自动 `uv sync`，下载 CUDA 版 torch 等约 4GB 依赖，可能需要 10 分钟以上；脚本在引擎/应用就绪后会自动打开 http://127.0.0.1:8091（也可以手动访问）。
+双击 `启动-声刻.cmd`。首次运行会先下载约 5.1 GB 模型权重，再自动 `uv sync` 下载 CUDA 版 torch 等约 4 GB 依赖；总耗时取决于网速，可能需要 20 分钟以上。脚本在引擎/应用就绪后会自动打开 http://127.0.0.1:8091（也可以手动访问）。
 
 仓库中的 `.cmd`/`.bat` 文件统一为 **ASCII 内容 + CRLF 换行**，不依赖 Windows 的系统区域或控制台代码页，也能兼容常见的 ASCII 兼容编码。修改启动脚本时不要加入中文或其他非 ASCII 字符；中文文档和 Python 源码使用 UTF-8。Git 会按 `.gitattributes` 处理批处理文件的换行。
 
-模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录（启动器、引擎启动脚本、应用都会读取）。
+模型默认从仓库内 `engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B` 读取；如果权重放在别处，启动前设置环境变量 `COSYVOICE_MODEL_DIR` 指向该目录（启动器、引擎启动脚本、应用都会读取），启动器会自动跳过下载。设置 `VS_NO_MODEL_DOWNLOAD=1` 可以关闭首次启动的自动下载。
 
 想再快一点可设置 `COSYVOICE_FP16=1` 后启动引擎（fp16 推理，仅 CUDA 生效，显存占用更低；个别显卡音质可能有轻微波动，默认关闭）。
 
@@ -53,7 +63,6 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 ```
 app/                Studio 后端 + 前端
 engine/CosyVoice/   引擎（git submodule，独立仓库）
-emotion/            情绪识别服务（50001，可选）
 emotion/            情绪识别服务（50001，可选）
 runtime/roxy-*/     内置情绪参考音频
 logs/               运行日志
