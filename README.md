@@ -2,6 +2,43 @@
 
 > 本地语音克隆 / 情感 TTS（CosyVoice3 + CAM++ 评测）。依赖由 **uv** 管理，模型权重首次启动自动下载。
 
+## 目录结构
+
+```
+voicesculptor-repo/
+├─ app/                        Studio 应用（FastAPI，端口 8091）
+│  ├─ app.py                   兼容入口：uvicorn app:app / python app.py 都走这里
+│  ├─ voicesculptor/
+│  │  ├─ config.py             运行配置（Settings.from_env）
+│  │  ├─ errors.py             异常层级，自带 HTTP 状态码
+│  │  ├─ emotions.py           六种情绪与情绪指令文案
+│  │  ├─ audio/                波形读写、参考音频预处理、韵律特征
+│  │  ├─ speaker/              CAM++ 说话人向量（onnxruntime）
+│  │  ├─ voices/               音色库读写、内置种子音色
+│  │  ├─ clients/              CosyVoice 引擎与情绪服务客户端
+│  │  ├─ synthesis/            请求校验、合成计划、候选排序、合成流水线
+│  │  ├─ envcheck/             环境检测（12 项），可命令行独立运行
+│  │  ├─ api/                  HTTP 路由与错误处理
+│  │  ├─ audit.py              素材体检报告
+│  │  └─ main.py               create_app / main
+│  ├─ static/                  前端（原生 ES Module，无构建步骤）
+│  │  ├─ index.html
+│  │  ├─ css/                  tokens / base / layout / components
+│  │  └─ js/                   main / api / store / dom / wav
+│  │     ├─ components/        状态芯片、音色列表、波形、结果卡等
+│  │     └─ views/             合成 / 情绪识别 / 素材体检 / 环境检测
+│  ├─ tests/                   pytest + 假引擎 / 假情绪服务
+│  └─ voices/                  音色库（参考音频 + meta.json，git 忽略）
+├─ emotion/                    情绪识别服务（FunASR，端口 50001）
+│  ├─ server.py                兼容入口
+│  ├─ voicesculptor_emotion/   config / labels / classifier / api / main
+│  └─ tests/
+├─ engine/CosyVoice/           CosyVoice 子模块（不改动）
+├─ logs/                       运行日志与体检报告（git 忽略）
+├─ pylintrc                    Google Python Style 的 pylint 配置
+└─ *.cmd                       启动脚本（ASCII 内容 + CRLF 换行）
+```
+
 ## 环境要求
 
 - Windows 10/11 64 位
@@ -44,11 +81,80 @@ set VS_MODEL_SOURCE=huggingface
 
 想再快一点可设置 `COSYVOICE_FP16=1` 后启动引擎（fp16 推理，仅 CUDA 生效，显存占用更低；个别显卡音质可能有轻微波动，默认关闭）。
 
+## 开发
+
+两个应用各自是一个 uv 项目，测试依赖放在 `test` 组里：
+
+```bat
+cd app
+uv sync --group test
+
+cd ..\emotion
+uv sync --group test
+```
+
+日常命令：
+
+```bat
+cd app
+.venv\Scripts\python -m pytest -q          REM 单元 + 接口测试
+.venv\Scripts\python -m voicesculptor.envcheck   REM 命令行自检
+.venv\Scripts\python app.py --port 8091    REM 只起 Studio（引擎需另开）
+```
+
+代码风格按 Google Python Style：4 空格缩进、80 列、类型注解、文档字符串；格式化和 import 排序由 yapf / isort 负责（配置在各自的 `pyproject.toml` 里，风格均为 Google）。前端是原生 ES Module：只用 `const`/`let`、命名导出，DOM 写入一律 `textContent`，不写内联样式和 `onclick`。
+
+## 测试
+
+```bat
+cd app
+.venv\Scripts\python -m pytest -q
+.venv\Scripts\python -m pylint --rcfile ..\pylintrc voicesculptor
+.venv\Scripts\python -m yapf --diff -r voicesculptor tests
+.venv\Scripts\python -m isort --check-only --diff voicesculptor tests
+
+cd ..\emotion
+.venv\Scripts\python -m pytest -q
+```
+
+接口测试会自己在随机端口起假引擎和假情绪服务，不需要 GPU，也不需要下载模型。
+
+## 环境检测
+
+环境检测覆盖 12 项，命令行走一遍最直观：
+
+```bat
+cd app
+.venv\Scripts\python -m voicesculptor.envcheck
+.venv\Scripts\python -m voicesculptor.envcheck --json
+```
+
+每行输出 `[OK  ] id  message`，有 `FAIL` 时退出码为 1。Studio 里对应「环境检测」页，页面上也能点一次重新检测；接口是 `GET /api/env?refresh=1`，它总是返回 200，检测结果不会阻止服务启动，只用来告诉你哪些能力暂时不可用。
+
+| # | 检测项 | 检查内容 | FAIL 时的影响 |
+|---|---|---|---|
+| 1 | `python` | Python 版本 ≥ 3.11 | 无法启动 |
+| 2 | `packages` | fastapi / numpy / onnxruntime / soundfile / torch / torchaudio / requests | 缺少依赖，功能不可用 |
+| 3 | `torch_cuda` | torch 是否可用 CUDA、显存大小 | 退回 CPU，合成很慢 |
+| 4 | `model_files` | 6 个模型权重是否齐全且非空 | 无法合成、无法算相似度 |
+| 5 | `cosyvoice` | 引擎 `/health`（50000 端口） | 无法合成 |
+| 6 | `emotion_service` | 情绪服务 `/health`（50001 端口） | 不做情绪校验与情绪择优 |
+| 7 | `audio_formats` | wav / mp3 / flac / ogg 解码能力 | 只能上传 wav |
+| 8 | `voice_dir` | 音色库目录可写 | 不能新建、删除音色 |
+| 9 | `broken_voices` | 损坏的音色目录（缺 ref.wav 或 meta.json） | 对应音色不可用 |
+| 10 | `seed_refs` | 6 个内置种子参考音频存在 | 首次启动补不齐默认音色 |
+| 11 | `disk_space` | 剩余磁盘空间（< 2 GB 警告，< 200 MB 失败） | 写不下新音色 |
+| 12 | `proxy` | 代理环境变量是否会拦截 127.0.0.1 | 应用连不上本机引擎 |
+
+检测结果同时推导出四项能力开关（`synthesize`、`similarity`、`emotion`、`clone`），前端据此置灰按钮。结果缓存 10 秒，`refresh=1` 可强制重跑。
+
 ## 情绪模式
 
 - **auto**：有情绪指令时自动用 instruct2（情绪优先）；参考音色本身即目标情绪时用 zero_shot。
 - **zero_shot**：只复刻参考音频的音色与语气，emotion 参数不生效。
 - **instruct2**：按情绪指令合成，情绪更明显，但音色相似度可能略降。
+
+best 模式（`best_n` > 1）默认把情绪识别结果计入择优打分：情绪与目标一致的候选会加分，情绪服务不可用时该项自动跳过。想恢复旧行为可设置 `VS_EMOTION_RANK=0`。
 
 ## 情绪识别服务（可选，端口 50001）
 
@@ -57,21 +163,3 @@ set VS_MODEL_SOURCE=huggingface
 - 用 GPU：启动前设置 `EMOTION_DEVICE=cuda:0`
 - 不启动它：设置 `VS_NO_EMOTION=1`
 - 能识别：生气 / 开心 / 平静 / 难过 / 惊讶（"撒娇"没有对应类别）
-
-## 目录
-
-```
-app/                Studio 后端 + 前端
-engine/CosyVoice/   引擎（git submodule，独立仓库）
-emotion/            情绪识别服务（50001，可选）
-runtime/roxy-*/     内置情绪参考音频
-logs/               运行日志
-```
-
-## 出问题
-
-双击 `诊断.cmd`，把 `logs\diagnostic-report.txt` 发回。
-
-## 说明
-
-仅用于课程/竞赛演示与学习，勿商用或模仿真人声音对外发布。

@@ -105,7 +105,7 @@ def run_in_thread(app):
         sock.close()
         raise RuntimeError('假服务启动超时')
     try:
-        yield 'http://127.0.0.1:%d' % port
+        yield f'http://127.0.0.1:{port}'
     finally:
         server.should_exit = True
         thread.join(timeout=5)

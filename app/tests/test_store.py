@@ -1,5 +1,8 @@
 """VoiceStore 的单元测试：创建、列表、删除与校验。"""
 
+# pytest 的 fixture 注入会与模块级同名函数重名，这里按 pytest 惯例放行。
+# pylint: disable=redefined-outer-name
+
 import io
 import json
 import os
@@ -115,13 +118,13 @@ def test_create_too_long_name_rejected(store):
 
 def test_create_without_prompt_warns(store):
     """没有转录文本时给出跨语种降级警告。"""
-    _meta, warnings = _create(store, prompt='')
+    _, warnings = _create(store, prompt='')
     assert any('未填写转录文本' in item for item in warnings)
 
 
 def test_create_short_reference_warns(store):
     """参考音频短于 3 秒时提示还原度下降。"""
-    _meta, warnings = _create(store, data=_wav_bytes(2.0))
+    _, warnings = _create(store, data=_wav_bytes(2.0))
     assert any('短于 3 秒' in item for item in warnings)
 
 
@@ -179,7 +182,7 @@ def test_seed_defaults_creates_and_skips(store, tmp_path, monkeypatch):
     seed = SeedVoice('coquettish', '撒娇', str(source), 'テスト')
     monkeypatch.setattr('voicesculptor.voices.seeds.SEED_VOICES', (seed,))
     store.seed_defaults()
-    meta, _ref = store.resolve('coquettish')
+    meta = store.resolve('coquettish')[0]
     assert meta['source'] == 'seed'
     assert meta['group'] == 'roxy'
     assert meta['emotion'] == '撒娇'

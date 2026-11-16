@@ -1,5 +1,8 @@
 """envcheck 单测：各检测分支、异常兜底、能力推导与缓存。"""
 
+# 测试需要直接调用私有入口，并用桩函数模拟慢检测，这里统一放行。
+# pylint: disable=protected-access,unused-argument
+
 import shutil
 import sys
 import time
@@ -130,7 +133,7 @@ def test_proxy_warns_without_no_proxy(monkeypatch):
 
 def test_runner_turns_exception_into_fail():
 
-    def boom(_ctx):
+    def boom(context):
         raise RuntimeError('kaboom')
 
     result = runner._run_one('demo', '演示', boom, None)

@@ -1,5 +1,8 @@
 """特征测试：锁定旧接口的对外行为，重构后必须保持一致。"""
 
+# pytest 的 fixture 注入会与模块级同名函数重名，这里按 pytest 惯例放行。
+# pylint: disable=redefined-outer-name
+
 import base64
 import io
 import os
