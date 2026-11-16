@@ -4,8 +4,6 @@ import dataclasses
 import threading
 import time
 
-import soundfile as sf
-
 from voicesculptor.envcheck import checks
 
 CHECK_BUDGET_SECONDS = 3.0
@@ -77,6 +75,7 @@ def _run_one(check_id, title, func, ctx) -> checks.CheckResult:
 def _supported_formats() -> list[str]:
     """当前 libsndfile 支持的上传扩展名。"""
     try:
+        import soundfile as sf  # pylint: disable=import-outside-toplevel
         available = sf.available_formats()
     except Exception:  # pylint: disable=broad-exception-caught
         return ['wav']

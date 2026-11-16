@@ -127,7 +127,22 @@ cd ..\emotion
 cd app
 .venv\Scripts\python -m voicesculptor.envcheck
 .venv\Scripts\python -m voicesculptor.envcheck --json
+.venv\Scripts\python -m voicesculptor.envcheck --fix
 ```
+
+`--fix` 先报告、再就地修、最后复检，输出「修复前 / 修复动作 / 修复后」三段：
+
+| 能自动修 | 做法 |
+|---|---|
+| `voice_dir` | 创建音色目录并确认可写 |
+| `broken_voices` | 把损坏目录移到 `voices/.broken/<id>-<时间戳>`，不删除 |
+| `packages` / `torch_cuda` / `audio_formats` | 在 app 目录执行 `uv sync`（需要 uv 在 PATH） |
+| `python` | `uv python install 3.11` |
+| `model_files` | 默认只提示；加 `--download-models` 才下载约 5.1 GB 权重 |
+
+`disk_space`、`seed_refs`、`proxy` 只给建议：磁盘要自己清，种子文件属于仓库内容，代理变量要改在启动环境里。`cosyvoice` / `emotion_service` 由 `启动-声刻.cmd` 拉起。
+
+纯净机器上的顺序：装 uv（`winget install astral-sh.uv`）→ `cd app && uv sync` → `.venv\Scripts\python -m voicesculptor.envcheck --fix` → 双击 `启动-声刻.cmd` 补模型并起服务。检测命令行只用标准库，依赖没装齐也能跑出报告。
 
 每行输出 `[OK  ] id  message`，有 `FAIL` 时退出码为 1。Studio 里对应「环境检测」页，页面上也能点一次重新检测；接口是 `GET /api/env?refresh=1`，它总是返回 200，检测结果不会阻止服务启动，只用来告诉你哪些能力暂时不可用。
 

@@ -9,13 +9,15 @@
 
 import dataclasses
 import enum
+import http.client
 import importlib.metadata
+import json
 import os
 import platform
 import shutil
 import sys
-
-import soundfile as sf
+import tempfile
+import urllib.parse
 
 from voicesculptor import config
 
@@ -75,12 +77,43 @@ class CheckResult:
 
 @dataclasses.dataclass
 class CheckContext:
-    """检测需要的依赖。"""
+    """检测需要的依赖；纯净环境里客户端与音色库可能不存在。"""
 
     settings: config.Settings
-    cosyvoice: object
-    emotion: object
-    store: object
+    cosyvoice: object | None = None
+    emotion: object | None = None
+    store: object | None = None
+
+
+def _probe_json(base: str, path: str, timeout: float = 1.5) -> dict | None:
+    """用标准库探一个本地 HTTP 接口，失败返回 None。"""
+    parsed = urllib.parse.urlparse(base)
+    host = parsed.hostname or '127.0.0.1'
+    port = parsed.port or 80
+    conn = None
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=timeout)
+        conn.request('GET', path)
+        response = conn.getresponse()
+        if response.status != 200:
+            return None
+        return json.loads(response.read().decode('utf-8'))
+    except (OSError, ValueError):
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def probe_writable(directory: str, create: bool = False) -> None:
+    """验证目录可写；create=True 时会先创建目录。"""
+    if create:
+        os.makedirs(directory, exist_ok=True)
+    if not os.path.isdir(directory):
+        raise OSError(f'目录不存在: {directory}')
+    handle, path = tempfile.mkstemp(prefix='.vs-probe-', dir=directory)
+    os.close(handle)
+    os.remove(path)
 
 
 def _result(check_id: str,
@@ -119,7 +152,11 @@ def check_packages(ctx: CheckContext) -> CheckResult:
 
 def check_torch_cuda(ctx: CheckContext) -> CheckResult:
     """torch 能否使用 CUDA。"""
-    import torch  # pylint: disable=import-outside-toplevel
+    try:
+        import torch  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return _result('torch_cuda', 'CUDA', Level.FAIL, '未安装 torch',
+                       '在 app 目录执行 uv sync')
 
     if not torch.cuda.is_available():
         return _result('torch_cuda', 'CUDA', Level.WARN,
@@ -144,7 +181,10 @@ def check_model_files(ctx: CheckContext) -> CheckResult:
 
 def check_cosyvoice(ctx: CheckContext) -> CheckResult:
     """CosyVoice 引擎是否在线。"""
-    payload = ctx.cosyvoice.health()
+    if ctx.cosyvoice is not None:
+        payload = ctx.cosyvoice.health()
+    else:
+        payload = _probe_json(ctx.settings.cosyvoice_base, '/health')
     if payload is None:
         return _result('cosyvoice', '合成引擎', Level.FAIL, '引擎未启动',
                        '双击 启动-声刻.cmd 会自动拉起引擎')
@@ -157,7 +197,10 @@ def check_cosyvoice(ctx: CheckContext) -> CheckResult:
 
 def check_emotion_service(ctx: CheckContext) -> CheckResult:
     """情绪服务是否加载完成。"""
-    payload = ctx.emotion.health()
+    if ctx.emotion is not None:
+        payload = ctx.emotion.health()
+    else:
+        payload = _probe_json(ctx.settings.emotion_base, '/health')
     if payload is None:
         return _result('emotion_service', '情绪服务', Level.WARN, '情绪服务不可用',
                        '运行 _run-emotion.cmd')
@@ -170,6 +213,11 @@ def check_emotion_service(ctx: CheckContext) -> CheckResult:
 
 def check_audio_formats(ctx: CheckContext) -> CheckResult:
     """libsndfile 支持的上传格式。"""
+    try:
+        import soundfile as sf  # pylint: disable=import-outside-toplevel
+    except ImportError:
+        return _result('audio_formats', '音频格式', Level.FAIL, '未安装 soundfile',
+                       '在 app 目录执行 uv sync')
     available = sf.available_formats()
     missing = [name for name, _ in AUDIO_FORMATS if name not in available]
     if missing:
@@ -181,15 +229,49 @@ def check_audio_formats(ctx: CheckContext) -> CheckResult:
 
 def check_voice_dir(ctx: CheckContext) -> CheckResult:
     """音色目录是否可写。"""
-    if ctx.store.is_writable():
+    if ctx.store is not None:
+        writable = ctx.store.is_writable()
+    else:
+        try:
+            probe_writable(ctx.settings.voice_dir)
+            writable = True
+        except OSError:
+            writable = False
+    if writable:
         return _result('voice_dir', '音色目录', Level.OK, ctx.settings.voice_dir)
+    hint = '检查目录权限或 VS_VOICE_DIR'
+    if not os.path.isdir(ctx.settings.voice_dir):
+        hint = '运行 python -m voicesculptor.envcheck --fix 创建目录'
     return _result('voice_dir', '音色目录', Level.FAIL,
-                   '不可写: ' + ctx.settings.voice_dir, '检查目录权限或 VS_VOICE_DIR')
+                   '不可写: ' + ctx.settings.voice_dir, hint)
+
+
+def _scan_broken_voices(voice_dir: str) -> list[str]:
+    """扫描有 meta.json 但缺 ref.wav 的音色目录。"""
+    broken = []
+    try:
+        names = sorted(os.listdir(voice_dir))
+    except OSError:
+        return broken
+    for name in names:
+        if name.startswith('.'):
+            continue
+        directory = os.path.join(voice_dir, name)
+        if not os.path.isdir(directory):
+            continue
+        has_meta = os.path.isfile(os.path.join(directory, 'meta.json'))
+        has_ref = os.path.isfile(os.path.join(directory, 'ref.wav'))
+        if has_meta and not has_ref:
+            broken.append(name)
+    return broken
 
 
 def check_broken_voices(ctx: CheckContext) -> CheckResult:
     """存在 meta.json 但缺 ref.wav 的音色。"""
-    broken = ctx.store.broken_voices()
+    if ctx.store is not None:
+        broken = ctx.store.broken_voices()
+    else:
+        broken = _scan_broken_voices(ctx.settings.voice_dir)
     if not broken:
         return _result('broken_voices', '损坏音色', Level.OK, '无')
     return _result('broken_voices', '损坏音色', Level.WARN,
@@ -227,5 +309,6 @@ def check_proxy(ctx: CheckContext) -> CheckResult:
     lowered = no_proxy.lower()
     if any(host in lowered for host in LOCAL_HOSTS):
         return _result('proxy', '代理', Level.OK, '代理已豁免本地地址')
-    return _result('proxy', '代理', Level.WARN, '已忽略代理访问本地服务',
+    return _result('proxy', '代理', Level.WARN,
+                   '已设置代理但未豁免 127.0.0.1（本机请求直连，下载仍走代理）',
                    '设置 NO_PROXY=127.0.0.1,localhost 可消除此提示')

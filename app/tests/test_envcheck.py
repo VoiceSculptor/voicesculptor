@@ -11,6 +11,7 @@ import types
 import pytest
 
 from voicesculptor.envcheck import checks
+from voicesculptor.envcheck import fixes
 from voicesculptor.envcheck import runner
 
 
@@ -180,3 +181,118 @@ def test_env_report_has_failure_flag(level):
     report = runner.EnvReport([checks.CheckResult('x', 'X', level, '')], {},
                               0.0)
     assert report.has_failure() is False
+
+
+def _item(check_id, level=checks.Level.FAIL):
+    return checks.CheckResult(check_id, check_id, level, 'demo')
+
+
+def test_light_context_voice_dir_missing(tmp_path):
+    ctx = checks.CheckContext(
+        types.SimpleNamespace(voice_dir=str(tmp_path / 'missing')))
+    result = checks.check_voice_dir(ctx)
+    assert result.level is checks.Level.FAIL
+    assert '--fix' in result.hint
+
+
+def test_light_context_voice_dir_writable(tmp_path):
+    ctx = checks.CheckContext(types.SimpleNamespace(voice_dir=str(tmp_path)))
+    assert checks.check_voice_dir(ctx).level is checks.Level.OK
+
+
+def test_light_context_scans_broken_voices(tmp_path):
+    broken = tmp_path / 'vid1'
+    broken.mkdir()
+    (broken / 'meta.json').write_text('{}', encoding='utf-8')
+    ctx = checks.CheckContext(types.SimpleNamespace(voice_dir=str(tmp_path)))
+    assert checks.check_broken_voices(ctx).level is checks.Level.WARN
+
+
+def test_light_context_engine_probe_offline():
+    settings = types.SimpleNamespace(cosyvoice_base='http://127.0.0.1:9',
+                                     emotion_base='http://127.0.0.1:9')
+    ctx = checks.CheckContext(settings)
+    assert checks.check_cosyvoice(ctx).level is checks.Level.FAIL
+    assert checks.check_emotion_service(ctx).level is checks.Level.WARN
+
+
+def test_fix_voice_dir_creates_directory(tmp_path):
+    voice_dir = tmp_path / 'voices'
+    ctx = checks.CheckContext(types.SimpleNamespace(voice_dir=str(voice_dir)))
+    outcome = fixes.fix_voice_dir(ctx, _item('voice_dir'))
+    assert outcome.ok is True
+    assert voice_dir.is_dir()
+
+
+def test_fix_broken_voices_quarantines(tmp_path):
+    broken = tmp_path / 'vid1'
+    broken.mkdir()
+    (broken / 'meta.json').write_text('{}', encoding='utf-8')
+    ctx = checks.CheckContext(types.SimpleNamespace(voice_dir=str(tmp_path)))
+    outcome = fixes.fix_broken_voices(ctx, _item('broken_voices'))
+    assert outcome.ok is True
+    assert not broken.exists()
+    assert (tmp_path / '.broken').is_dir()
+
+
+def test_fix_packages_without_uv(monkeypatch):
+    monkeypatch.setattr(fixes.shutil, 'which', lambda name: None)
+    ctx = checks.CheckContext(types.SimpleNamespace())
+    outcome = fixes.fix_packages(ctx, _item('packages'))
+    assert outcome.ok is False
+    assert 'uv' in outcome.message
+
+
+def test_fix_model_files_points_to_launcher():
+    ctx = checks.CheckContext(types.SimpleNamespace(model_dir='C:/models'))
+    outcome = fixes.fix_model_files(ctx, _item('model_files'))
+    assert outcome.ok is False
+    assert '--download-models' in outcome.message
+
+
+def test_download_models_runs_script(tmp_path, monkeypatch):
+    script = tmp_path / 'download_models.py'
+    script.write_text('', encoding='utf-8')
+    monkeypatch.setattr(fixes.config, 'ROOT_DIR', str(tmp_path))
+    monkeypatch.setattr(fixes.shutil, 'which', lambda name: 'uv.exe')
+    seen = {}
+
+    def fake_run(argv, timeout):
+        seen['argv'] = argv
+        return 0, 'ok'
+
+    monkeypatch.setattr(fixes, '_run_command', fake_run)
+    ctx = checks.CheckContext(
+        types.SimpleNamespace(model_dir=str(tmp_path / 'models')))
+    outcome = fixes.download_models(ctx, _item('model_files'))
+    assert outcome.ok is True
+    assert 'download_models.py' in ' '.join(seen['argv'])
+
+
+def test_apply_only_touches_repairable_failures(tmp_path, monkeypatch):
+    ctx = checks.CheckContext(
+        types.SimpleNamespace(voice_dir=str(tmp_path / 'voices')))
+    report = types.SimpleNamespace(checks=[
+        checks.CheckResult('voice_dir', '音色目录', checks.Level.FAIL, ''),
+        checks.CheckResult('seed_refs', '种子参考', checks.Level.WARN, ''),
+        checks.CheckResult('python', 'Python 版本', checks.Level.OK, ''),
+    ])
+    monkeypatch.setattr(fixes, 'fix_python', lambda ctx, item: None)
+    outcomes = fixes.apply(report, ctx)
+    assert [item.id for item in outcomes] == ['voice_dir']
+
+
+def test_fix_packages_keeps_extra_packages(monkeypatch, tmp_path):
+    monkeypatch.setattr(fixes.shutil, 'which', lambda name: 'uv.exe')
+    seen = {}
+
+    def fake_run(argv, timeout):
+        seen['argv'] = argv
+        return 0, 'ok'
+
+    monkeypatch.setattr(fixes, '_run_command', fake_run)
+    monkeypatch.setattr(fixes.config, 'APP_DIR', str(tmp_path))
+    ctx = checks.CheckContext(types.SimpleNamespace())
+    outcome = fixes.fix_packages(ctx, _item('packages'))
+    assert outcome.ok is True
+    assert '--inexact' in seen['argv']
