@@ -1,82 +1,82 @@
 @echo off
+chcp 936 >nul
 rem ============================================================
-rem 一键诊断：把系统/显卡/驱动/Python/CUDA/文件完整性/端口/日志尾部
-rem 全部写进 logs\诊断报告.txt，用户直接把这个文件发回即可定位问题
-rem   · 依赖已改用 uv，Python 自检通过引擎项目的 uv 环境运行
+rem һ����ϣ���ϵͳ/�Կ�/����/Python/CUDA/�ļ�������/�˿�/��־β��
+rem ȫ��д�� logs\��ϱ���.txt���û�ֱ�Ӱ�����ļ����ؼ��ɶ�λ����
+rem   �� �����Ѹ��� uv��Python �Լ�ͨ��������Ŀ�� uv ��������
 rem ============================================================
-chcp 65001 >nul
 setlocal
-title 声刻 诊断
+title ���� ���
 set "ROOT=%~dp0"
 set "ENG=%ROOT%engine\CosyVoice"
 set "MODEL=%ENG%\pretrained_models\Fun-CosyVoice3-0.5B"
-set "REPORT=%ROOT%logs\诊断报告.txt"
+set "REPORT=%ROOT%logs\��ϱ���.txt"
 if not exist "%ROOT%logs" mkdir "%ROOT%logs"
 
-echo.正在收集环境信息，请稍候（首次含 uv sync，较久）...
-> "%REPORT%" echo ======== 声刻 环境诊断报告 ========
->> "%REPORT%" echo 时间: %date% %time%
->> "%REPORT%" echo 目录: %ROOT%
+echo.�����ռ�������Ϣ�����Ժ��״κ� uv sync���Ͼã�...
+> "%REPORT%" echo ======== ���� ������ϱ��� ========
+>> "%REPORT%" echo ʱ��: %date% %time%
+>> "%REPORT%" echo Ŀ¼: %ROOT%
 >> "%REPORT%" echo.
 
->> "%REPORT%" echo ---- 系统 ----
+>> "%REPORT%" echo ---- ϵͳ ----
 ver >> "%REPORT%" 2>&1
 powershell -NoProfile -Command "Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,OSArchitecture,TotalVisibleMemorySize,FreePhysicalMemory | Format-List" >> "%REPORT%" 2>&1
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- 显卡 / 驱动 ----
+>> "%REPORT%" echo ---- �Կ� / ���� ----
 where nvidia-smi >nul 2>nul
 if errorlevel 1 (
-  >> "%REPORT%" echo [无] 未找到 nvidia-smi，可能没有 NVIDIA 显卡或驱动未安装
+  >> "%REPORT%" echo [��] δ�ҵ� nvidia-smi������û�� NVIDIA �Կ�������δ��װ
 ) else (
   powershell -NoProfile -Command "nvidia-smi --query-gpu=name,driver_version,memory.total,memory.used --format=csv" >> "%REPORT%" 2>&1
   powershell -NoProfile -Command "nvidia-smi | Select-String 'CUDA Version'" >> "%REPORT%" 2>&1
 )
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- 磁盘 ----
+>> "%REPORT%" echo ---- ���� ----
 powershell -NoProfile -Command "Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,@{n='FreeGB';e={[math]::Round($_.FreeSpace/1GB,1)}},@{n='TotalGB';e={[math]::Round($_.Size/1GB,1)}} | Format-Table" >> "%REPORT%" 2>&1
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- 工具 / 文件完整性 ----
+>> "%REPORT%" echo ---- ���� / �ļ������� ----
 where uv >nul 2>nul
-if errorlevel 1 ( >> "%REPORT%" echo [缺失] uv 未安装（winget install astral-sh.uv） ) else ( >> "%REPORT%" echo [OK] uv )
+if errorlevel 1 ( >> "%REPORT%" echo [ȱʧ] uv δ��װ��winget install astral-sh.uv�� ) else ( >> "%REPORT%" echo [OK] uv )
 for %%F in ("%ENG%\runtime\python\fastapi\server.py" "%MODEL%\llm.pt" "%MODEL%\flow.pt" "%MODEL%\hift.pt" "%MODEL%\campplus.onnx" "%MODEL%\speech_tokenizer_v3.onnx" "%MODEL%\CosyVoice-BlankEN\model.safetensors" "%MODEL%\cosyvoice3.yaml" "%MODEL%\config.json" "%ROOT%app\app.py") do (
-  if exist %%F ( >> "%REPORT%" echo [OK]   %%~fF ) else ( >> "%REPORT%" echo [缺失] %%~fF )
+  if exist %%F ( >> "%REPORT%" echo [OK]   %%~fF ) else ( >> "%REPORT%" echo [ȱʧ] %%~fF )
 )
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- Python / CUDA 自检（引擎 uv 环境）----
+>> "%REPORT%" echo ---- Python / CUDA �Լ죨���� uv ������----
 cd /d "%ENG%" 2>nul
 if errorlevel 1 (
-  >> "%REPORT%" echo [错误] 找不到引擎目录: %ENG%
+  >> "%REPORT%" echo [����] �Ҳ�������Ŀ¼: %ENG%
 ) else (
   uv run python "%ROOT%_selfcheck.py" >> "%REPORT%" 2>&1
 )
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- 端口占用 ----
+>> "%REPORT%" echo ---- �˿�ռ�� ----
 powershell -NoProfile -Command "netstat -ano | Select-String -Pattern ':50000\s',':8091\s'" >> "%REPORT%" 2>&1
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- 引擎日志（最后 40 行）----
+>> "%REPORT%" echo ---- ������־����� 40 �У�----
 if exist "%ROOT%logs\engine.log" (
   powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath '%ROOT%logs\engine.log' -Encoding UTF8 -Tail 40" >> "%REPORT%" 2>&1
 ) else (
-  >> "%REPORT%" echo [无] 还没有 engine.log（可能从未成功启动过引擎）
+  >> "%REPORT%" echo [��] ��û�� engine.log�����ܴ�δ�ɹ����������棩
 )
 
 >> "%REPORT%" echo.
->> "%REPORT%" echo ---- 应用日志（最后 40 行）----
+>> "%REPORT%" echo ---- Ӧ����־����� 40 �У�----
 if exist "%ROOT%logs\app.log" (
   powershell -NoProfile -Command "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-Content -LiteralPath '%ROOT%logs\app.log' -Encoding UTF8 -Tail 40" >> "%REPORT%" 2>&1
 ) else (
-  >> "%REPORT%" echo [无] 还没有 app.log（应用可能从未成功启动过）
+  >> "%REPORT%" echo [��] ��û�� app.log��Ӧ�ÿ��ܴ�δ�ɹ���������
 )
 
 echo.
-echo.诊断完成：%REPORT%
+echo.�����ɣ�%REPORT%
 echo.
-echo.请把这个文件发回：%REPORT%
+echo.�������ļ����أ�%REPORT%
 echo.
 pause

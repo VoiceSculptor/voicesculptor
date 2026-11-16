@@ -1,29 +1,29 @@
 @echo off
+chcp 936 >nul
 rem ============================================================
-rem æƒ…ç»ªè¯†åˆ«æœåŠ¡åŒ…è£…å™¨ï¼šemotion\server.pyï¼ˆemotion2vec_plus_largeï¼‰ï¼Œç«¯å£ 50001
-rem   Â· å¯é€‰ç»„ä»¶ï¼šæ²¡èµ·æ¥æ—¶ app ç…§å¸¸åˆæˆï¼Œåªæ˜¯ä¸åˆ¤æƒ…ç»ª
-rem   Â· ä¾èµ–ç”± emotion\pyproject.toml ç®¡ç†ï¼Œuv sync è‡ªåŠ¨å®‰è£…
+rem ÇéÐ÷Ê¶±ð·þÎñ°ü×°Æ÷£ºemotion\server.py£¨emotion2vec_plus_large£©£¬¶Ë¿Ú 50001
+rem   ¡¤ ¿ÉÑ¡×é¼þ£ºÃ»ÆðÀ´Ê± app ÕÕ³£ºÏ³É£¬Ö»ÊÇ²»ÅÐÇéÐ÷
+rem   ¡¤ ÒÀÀµÓÉ emotion\pyproject.toml ¹ÜÀí£¬uv sync ×Ô¶¯°²×°
 rem ============================================================
-chcp 65001 >nul
 setlocal
-title å£°åˆ» æƒ…ç»ªæœåŠ¡ï¼ˆuvï¼‰
+title Éù¿Ì ÇéÐ÷·þÎñ£¨uv£©
 set "ROOT=%~dp0"
 set "LOG=%ROOT%logs"
 if not exist "%LOG%" mkdir "%LOG%"
 set "PYTHONUTF8=1"
-echo ==== %date% %time% æƒ…ç»ªæœåŠ¡å¯åŠ¨ï¼ˆuvï¼‰==== >> "%LOG%\emotion.log"
+echo ==== %date% %time% ÇéÐ÷·þÎñÆô¶¯£¨uv£©==== >> "%LOG%\emotion.log"
 cd /d "%ROOT%emotion" 2>nul || (
-  echo [é”™è¯¯] æ‰¾ä¸åˆ°ç›®å½•: %ROOT%emotion
+  echo [´íÎó] ÕÒ²»µ½Ä¿Â¼: %ROOT%emotion
   pause & exit /b 1
 )
 echo ---- uv sync ---- >> "%LOG%\emotion.log"
 uv sync >> "%LOG%\emotion.log" 2>&1
 if errorlevel 1 (
-  echo [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ï¼ˆuv syncï¼‰ï¼Œè¯¦è§ %LOG%\emotion.log
+  echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¨uv sync£©£¬Ïê¼û %LOG%\emotion.log
   pause
   exit /b 1
 )
 echo ---- uv run server.py ---- >> "%LOG%\emotion.log"
 uv run python -u server.py --port 50001 >> "%LOG%\emotion.log" 2>&1
-echo [æƒ…ç»ªæœåŠ¡å·²é€€å‡º] é€€å‡ºç  %errorlevel%ï¼Œæ—¥å¿—: %LOG%\emotion.log
+echo [ÇéÐ÷·þÎñÒÑÍË³ö] ÍË³öÂë %errorlevel%£¬ÈÕÖ¾: %LOG%\emotion.log
 pause

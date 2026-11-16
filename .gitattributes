@@ -1,0 +1,16 @@
+# Windows 批处理脚本对换行非常敏感：必须是 CRLF，否则 cmd.exe 解析错乱
+# （本仓库 .cmd 均为 UTF-8 编码 + CRLF，首行 chcp 65001 切换代码页）
+*.cmd    text eol=crlf
+*.bat    text eol=crlf
+
+# 其余纯文本按默认处理（git 自动识别，Windows 下检出时为 CRLF）
+*        text=auto
+
+# 二进制格式明确声明，避免 git 误判
+*.wav    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.ico    binary
+*.pt     binary
+*.onnx   binary

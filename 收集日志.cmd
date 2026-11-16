@@ -1,37 +1,37 @@
 @echo off
+chcp 936 >nul
 rem ============================================================
-rem æŠŠ logs ç›®å½•æ‰“åŒ…æˆ æ—¥å¿—åŒ….zipï¼Œæ–¹ä¾¿å‘ç»™å¼€å‘è€…
+rem °Ñ logs Ä¿Â¼´ò°ü³É ÈÕÖ¾°ü.zip£¬·½±ã·¢¸ø¿ª·¢Õß
 rem ============================================================
-chcp 65001 >nul
 setlocal
-title å£°åˆ» æ”¶é›†æ—¥å¿—
+title Éù¿Ì ÊÕ¼¯ÈÕÖ¾
 set "ROOT=%~dp0"
-set "OUT=%ROOT%æ—¥å¿—åŒ….zip"
+set "OUT=%ROOT%ÈÕÖ¾°ü.zip"
 if not exist "%ROOT%logs" mkdir "%ROOT%logs"
 if exist "%OUT%" del /f /q "%OUT%"
 
-echo.æ­£åœ¨æ”¶é›†çŽ¯å¢ƒä¿¡æ¯...
-> "%ROOT%logs\çŽ¯å¢ƒ.txt" echo æ—¶é—´: %date% %time%
->> "%ROOT%logs\çŽ¯å¢ƒ.txt" echo ç›®å½•: %ROOT%
-uv --version >> "%ROOT%logs\çŽ¯å¢ƒ.txt" 2>&1
-git -C "%ROOT%." rev-parse --short HEAD >> "%ROOT%logs\çŽ¯å¢ƒ.txt" 2>&1
-git -C "%ROOT%engine\CosyVoice" rev-parse --short HEAD >> "%ROOT%logs\çŽ¯å¢ƒ.txt" 2>&1
+echo.ÕýÔÚÊÕ¼¯»·¾³ÐÅÏ¢...
+> "%ROOT%logs\»·¾³.txt" echo Ê±¼ä: %date% %time%
+>> "%ROOT%logs\»·¾³.txt" echo Ä¿Â¼: %ROOT%
+uv --version >> "%ROOT%logs\»·¾³.txt" 2>&1
+git -C "%ROOT%." rev-parse --short HEAD >> "%ROOT%logs\»·¾³.txt" 2>&1
+git -C "%ROOT%engine\CosyVoice" rev-parse --short HEAD >> "%ROOT%logs\»·¾³.txt" 2>&1
 
-echo.æ­£åœ¨æ‰“åŒ…æ—¥å¿—...
+echo.ÕýÔÚ´ò°üÈÕÖ¾...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "if (Test-Path '%ROOT%logs') { Compress-Archive -Path '%ROOT%logs\*' -DestinationPath '%OUT%' -Force }"
 if errorlevel 1 (
   echo.
-  echo.[è­¦å‘Š] æ—¥å¿—æ‰“åŒ…å¤±è´¥ï¼ˆå¯èƒ½æœ‰æ–‡ä»¶æ­£è¢«å ç”¨ï¼‰ã€‚è¯·å…ˆå…³é—­ã€Œå£°åˆ»ã€çª—å£ï¼Œå†è¿è¡Œæœ¬è„šæœ¬ã€‚
+  echo.[¾¯¸æ] ÈÕÖ¾´ò°üÊ§°Ü£¨¿ÉÄÜÓÐÎÄ¼þÕý±»Õ¼ÓÃ£©¡£ÇëÏÈ¹Ø±Õ¡¸Éù¿Ì¡¹´°¿Ú£¬ÔÙÔËÐÐ±¾½Å±¾¡£
 )
 
 if exist "%OUT%" (
   echo.
-  echo.å·²ç”Ÿæˆï¼š%OUT%
-  echo.è¯·æŠŠè¿™ä¸ªæ–‡ä»¶å‘å›žç»™å¼€å‘è€…ã€‚
+  echo.ÒÑÉú³É£º%OUT%
+  echo.Çë°ÑÕâ¸öÎÄ¼þ·¢»Ø¸ø¿ª·¢Õß¡£
 ) else (
   echo.
-  echo.[æç¤º] æ²¡æœ‰æ‰¾åˆ° logs ç›®å½•æˆ–é‡Œé¢æ²¡æœ‰æ–‡ä»¶ã€‚
-  echo.       è¯·å…ˆè¿è¡Œä¸€æ¬¡ã€Œå¯åŠ¨-å£°åˆ».cmdã€ï¼Œå†è¿è¡Œæœ¬è„šæœ¬ã€‚
+  echo.[ÌáÊ¾] Ã»ÓÐÕÒµ½ logs Ä¿Â¼»òÀïÃæÃ»ÓÐÎÄ¼þ¡£
+  echo.       ÇëÏÈÔËÐÐÒ»´Î¡¸Æô¶¯-Éù¿Ì.cmd¡¹£¬ÔÙÔËÐÐ±¾½Å±¾¡£
 )
 echo.
 pause

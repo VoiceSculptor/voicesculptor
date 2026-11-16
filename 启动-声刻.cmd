@@ -1,24 +1,24 @@
 @echo off
+chcp 936 >nul
 rem ============================================================
-rem å£°åˆ» Studio å¯åŠ¨å™¨ï¼ˆä¸€é”®å¯åŠ¨å¼•æ“Ž + åº”ç”¨ + æ‰“å¼€æµè§ˆå™¨ï¼‰
-rem ä¾èµ–ç®¡ç†å·²æ”¹ä¸º uvï¼ˆä¸å†ç”¨ä¾¿æº Pythonï¼‰ï¼š
-rem   Â· éœ€å…ˆå®‰è£… uvï¼šwinget install astral-sh.uv
-rem   Â· æ¨¡åž‹æƒé‡ä»éœ€æ”¾åœ¨ engine\CosyVoice\pretrained_models\Fun-CosyVoice3-0.5B
-rem æ‰§è¡Œé¡ºåºï¼š
-rem   1) æ£€æŸ¥ uv ä¸Žæ¨¡åž‹æ˜¯å¦å­˜åœ¨
-rem   2) è‹¥ 50000 æœªç›‘å¬ -> è°ƒ _run-engine.cmd å¯åŠ¨å¼•æ“Žï¼ˆæ—¥å¿— logs\engine.logï¼‰
-rem   3) è‹¥ 8091 æœªç›‘å¬ -> è°ƒ _run-app.cmd  å¯åŠ¨åº”ç”¨ï¼ˆæ—¥å¿— logs\app.logï¼‰
-rem   4) ä¸¤ä¸ªç«¯å£éƒ½å¯è¿žåŽï¼Œæ‰æ‰“å¼€æµè§ˆå™¨ http://127.0.0.1:8091
-rem è®¾è®¡è¦ç‚¹ï¼ˆè¸©è¿‡çš„å‘ï¼‰ï¼š
-rem   Â· è®¡æ—¶ç”¨ ping -nï¼Œä¸è¦ç”¨ timeoutï¼ˆè¾“å…¥è¢«é‡å®šå‘æ—¶ timeout ä¼šç«‹å³å¤±è´¥ï¼‰
-rem   Â· å¯åŠ¨å­è„šæœ¬ç”¨  start "æ ‡é¢˜" /min "è„šæœ¬" ï¼›
-rem     ä¸è¦å†™ start "æ ‡é¢˜" /min cmd /c ""è„šæœ¬""ï¼ˆåŒå¼•å·åµŒå¥—ä¼šè®©è„šæœ¬æ ¹æœ¬ä¸æ‰§è¡Œï¼‰
-rem   Â· æœ¬æ–‡ä»¶å¿…é¡»æ˜¯ CRLF æ¢è¡Œï¼ŒLF ä¼šå¯¼è‡´å˜é‡è§£æžé”™ä¹±
-rem   Â· å¤±è´¥æ—¶ä¸è¦ç›´æŽ¥é€€å‡ºï¼Œè¦æ‰“å°æ—¥å¿—å°¾éƒ¨å¹¶ pause
+rem Éù¿Ì Studio Æô¶¯Æ÷£¨Ò»¼üÆô¶¯ÒýÇæ + Ó¦ÓÃ + ´ò¿ªä¯ÀÀÆ÷£©
+rem ÒÀÀµ¹ÜÀíÒÑ¸ÄÎª uv£¨²»ÔÙÓÃ±ãÐ¯ Python£©£º
+rem   ¡¤ ÐèÏÈ°²×° uv£ºwinget install astral-sh.uv
+rem   ¡¤ Ä£ÐÍÈ¨ÖØÈÔÐè·ÅÔÚ engine\CosyVoice\pretrained_models\Fun-CosyVoice3-0.5B
+rem Ö´ÐÐË³Ðò£º
+rem   1) ¼ì²é uv ÓëÄ£ÐÍÊÇ·ñ´æÔÚ
+rem   2) Èô 50000 Î´¼àÌý -> µ÷ _run-engine.cmd Æô¶¯ÒýÇæ£¨ÈÕÖ¾ logs\engine.log£©
+rem   3) Èô 8091 Î´¼àÌý -> µ÷ _run-app.cmd  Æô¶¯Ó¦ÓÃ£¨ÈÕÖ¾ logs\app.log£©
+rem   4) Á½¸ö¶Ë¿Ú¶¼¿ÉÁ¬ºó£¬²Å´ò¿ªä¯ÀÀÆ÷ http://127.0.0.1:8091
+rem Éè¼ÆÒªµã£¨²È¹ýµÄ¿Ó£©£º
+rem   ¡¤ ¼ÆÊ±ÓÃ ping -n£¬²»ÒªÓÃ timeout£¨ÊäÈë±»ÖØ¶¨ÏòÊ± timeout »áÁ¢¼´Ê§°Ü£©
+rem   ¡¤ Æô¶¯×Ó½Å±¾ÓÃ  start "±êÌâ" /min "½Å±¾" £»
+rem     ²»ÒªÐ´ start "±êÌâ" /min cmd /c ""½Å±¾""£¨Ë«ÒýºÅÇ¶Ì×»áÈÃ½Å±¾¸ù±¾²»Ö´ÐÐ£©
+rem   ¡¤ ±¾ÎÄ¼þ±ØÐëÊÇ CRLF »»ÐÐ£¬LF »áµ¼ÖÂ±äÁ¿½âÎö´íÂÒ
+rem   ¡¤ Ê§°ÜÊ±²»ÒªÖ±½ÓÍË³ö£¬Òª´òÓ¡ÈÕÖ¾Î²²¿²¢ pause
 rem ============================================================
-chcp 65001 >nul
 setlocal
-title å£°åˆ» Studioï¼ˆuvï¼‰
+title Éù¿Ì Studio£¨uv£©
 set "ROOT=%~dp0"
 set "ENG=%ROOT%engine\CosyVoice"
 set "MODEL=%ENG%\pretrained_models\Fun-CosyVoice3-0.5B"
@@ -30,21 +30,21 @@ cd /d "%ROOT%"
 if not exist "%LOG%" mkdir "%LOG%"
 
 echo ============================================
-echo   å£°åˆ» Studioï¼ˆuv ç‰ˆï¼‰
-echo   ç›®å½•: %ROOT%
-echo   æ—¥å¿—: %LOG%
+echo   Éù¿Ì Studio£¨uv °æ£©
+echo   Ä¿Â¼: %ROOT%
+echo   ÈÕÖ¾: %LOG%
 echo ============================================
 echo.
 
 where uv >nul 2>nul
 if errorlevel 1 (
-  echo [é”™è¯¯] æœªæ‰¾åˆ° uvã€‚è¯·å…ˆå®‰è£…ï¼šwinget install astral-sh.uv
+  echo [´íÎó] Î´ÕÒµ½ uv¡£ÇëÏÈ°²×°£ºwinget install astral-sh.uv
   pause & exit /b 1
 )
 for %%F in ("llm.pt" "flow.pt" "hift.pt" "campplus.onnx" "speech_tokenizer_v3.onnx" "CosyVoice-BlankEN\model.safetensors") do (
   if not exist "%MODEL%\%%~F" (
-    echo [é”™è¯¯] æ‰¾ä¸åˆ°æ¨¡åž‹æ–‡ä»¶: %MODEL%\%%~F
-    echo        è¯·ä»Ž Release ä¸‹è½½æƒé‡ï¼Œæ”¾åˆ°è¯¥ç›®å½•
+    echo [´íÎó] ÕÒ²»µ½Ä£ÐÍÎÄ¼þ: %MODEL%\%%~F
+    echo        Çë´Ó Release ÏÂÔØÈ¨ÖØ£¬·Åµ½¸ÃÄ¿Â¼
     pause & exit /b 1
   )
 )
@@ -53,9 +53,9 @@ netstat -ano | findstr ":%EPORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto engine_ready
 
 if exist "%LOG%\engine.failed" del /q "%LOG%\engine.failed"
-echo [1/3] å¯åŠ¨è¯­éŸ³å¼•æ“Ž ...
-echo       é¦–æ¬¡è¿è¡Œä¼šä¸‹è½½çº¦ 4GB ä¾èµ–ï¼ˆå« CUDA ç‰ˆ torchï¼‰ï¼Œå¯èƒ½éœ€è¦ 10 åˆ†é’Ÿä»¥ä¸Šï¼Œè¯·è€å¿ƒç­‰å¾…...
-start "å£°åˆ»-å¼•æ“Ž" /min "%ROOT%_run-engine.cmd"
+echo [1/3] Æô¶¯ÓïÒôÒýÇæ ...
+echo       Ê×´ÎÔËÐÐ»áÏÂÔØÔ¼ 4GB ÒÀÀµ£¨º¬ CUDA °æ torch£©£¬¿ÉÄÜÐèÒª 10 ·ÖÖÓÒÔÉÏ£¬ÇëÄÍÐÄµÈ´ý...
+start "Éù¿Ì-ÒýÇæ" /min "%ROOT%_run-engine.cmd"
 set /a _w=0
 :wait_engine
 ping -n 6 127.0.0.1 >nul
@@ -67,39 +67,39 @@ if %_w% GEQ 900 goto engine_timeout
 goto wait_engine
 
 :engine_up
-echo       å¼•æ“Žå°±ç»ªï¼ˆ%_w% ç§’ï¼‰
+echo       ÒýÇæ¾ÍÐ÷£¨%_w% Ãë£©
 goto engine_ready
 
 :engine_failed
 echo.
-echo [å¤±è´¥] å¼•æ“Žå¯åŠ¨å¤±è´¥ï¼ˆå¤šåŠæ˜¯ä¾èµ–å®‰è£…å¤±è´¥ï¼Œä¸æ˜¯å¯åŠ¨æ…¢ï¼‰ã€‚æ—¥å¿—æœ€åŽ 20 è¡Œï¼š
+echo [Ê§°Ü] ÒýÇæÆô¶¯Ê§°Ü£¨¶à°ëÊÇÒÀÀµ°²×°Ê§°Ü£¬²»ÊÇÆô¶¯Âý£©¡£ÈÕÖ¾×îºó 20 ÐÐ£º
 goto engine_print_log
 
 :engine_timeout
 echo.
-echo [å¤±è´¥] å¼•æ“Ž 15 åˆ†é’Ÿå†…æ²¡æœ‰å¯åŠ¨ï¼ˆé¦–æ¬¡å®‰è£…ä¾èµ–è¾ƒæ…¢ï¼‰ã€‚æ—¥å¿—æœ€åŽ 20 è¡Œï¼š
+echo [Ê§°Ü] ÒýÇæ 15 ·ÖÖÓÄÚÃ»ÓÐÆô¶¯£¨Ê×´Î°²×°ÒÀÀµ½ÏÂý£©¡£ÈÕÖ¾×îºó 20 ÐÐ£º
 :engine_print_log
 echo --------------------------------------------
-powershell -NoProfile -Command "$p='%LOG%\engine.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { 'ï¼ˆæ²¡æœ‰ engine.logï¼‰' }"
+powershell -NoProfile -Command "$p='%LOG%\engine.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { '£¨Ã»ÓÐ engine.log£©' }"
 echo --------------------------------------------
-echo è¯·è¿è¡Œã€Œè¯Šæ–­.cmdã€ï¼ŒæŠŠ logs\è¯Šæ–­æŠ¥å‘Š.txt å‘å›žã€‚
+echo ÇëÔËÐÐ¡¸Õï¶Ï.cmd¡¹£¬°Ñ logs\Õï¶Ï±¨¸æ.txt ·¢»Ø¡£
 pause & exit /b 1
 
 :engine_ready
-echo [1/3] å¼•æ“Žå·²åœ¨è¿è¡Œï¼ˆç«¯å£ %EPORT%ï¼‰
-rem æƒ…ç»ªæœåŠ¡ï¼ˆ50001ï¼‰ä¸ºå¯é€‰ç»„ä»¶ï¼šåªå¯åŠ¨ã€ä¸ç­‰å¾…ï¼›è®¾ç½® VS_NO_EMOTION=1 å¯è·³è¿‡
+echo [1/3] ÒýÇæÒÑÔÚÔËÐÐ£¨¶Ë¿Ú %EPORT%£©
+rem ÇéÐ÷·þÎñ£¨50001£©Îª¿ÉÑ¡×é¼þ£ºÖ»Æô¶¯¡¢²»µÈ´ý£»ÉèÖÃ VS_NO_EMOTION=1 ¿ÉÌø¹ý
 netstat -ano | findstr ":50001 " | findstr LISTENING >nul
 if errorlevel 1 if not defined VS_NO_EMOTION (
-  echo       å¯åŠ¨æƒ…ç»ªæœåŠ¡ï¼ˆç«¯å£ 50001ï¼Œå¯é€‰ï¼›é¦–æ¬¡éœ€ä¸‹è½½æ¨¡åž‹ï¼‰...
-  start "å£°åˆ»-æƒ…ç»ª" /min "%ROOT%_run-emotion.cmd"
+  echo       Æô¶¯ÇéÐ÷·þÎñ£¨¶Ë¿Ú 50001£¬¿ÉÑ¡£»Ê×´ÎÐèÏÂÔØÄ£ÐÍ£©...
+  start "Éù¿Ì-ÇéÐ÷" /min "%ROOT%_run-emotion.cmd"
 )
 
 netstat -ano | findstr ":%PORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto app_ready
 
 if exist "%LOG%\app.failed" del /q "%LOG%\app.failed"
-echo [2/3] å¯åŠ¨å£°åˆ» Studio...
-start "å£°åˆ»-åº”ç”¨" /min "%ROOT%_run-app.cmd"
+echo [2/3] Æô¶¯Éù¿Ì Studio...
+start "Éù¿Ì-Ó¦ÓÃ" /min "%ROOT%_run-app.cmd"
 set /a _a=0
 :wait_app
 ping -n 4 127.0.0.1 >nul
@@ -111,37 +111,37 @@ if %_a% GEQ 600 goto app_timeout
 goto wait_app
 
 :app_up
-echo       åº”ç”¨å°±ç»ªï¼ˆ%_a% ç§’ï¼‰
+echo       Ó¦ÓÃ¾ÍÐ÷£¨%_a% Ãë£©
 goto app_ready
 
 :app_failed
 echo.
-echo [å¤±è´¥] åº”ç”¨å¯åŠ¨å¤±è´¥ï¼ˆå¤šåŠæ˜¯ä¾èµ–å®‰è£…å¤±è´¥ï¼Œä¸æ˜¯å¯åŠ¨æ…¢ï¼‰ã€‚æ—¥å¿—æœ€åŽ 20 è¡Œï¼š
+echo [Ê§°Ü] Ó¦ÓÃÆô¶¯Ê§°Ü£¨¶à°ëÊÇÒÀÀµ°²×°Ê§°Ü£¬²»ÊÇÆô¶¯Âý£©¡£ÈÕÖ¾×îºó 20 ÐÐ£º
 goto app_print_log
 
 :app_timeout
 echo.
-echo [å¤±è´¥] åº”ç”¨ 10 åˆ†é’Ÿå†…æ²¡æœ‰å¯åŠ¨ã€‚æ—¥å¿—æœ€åŽ 20 è¡Œï¼š
+echo [Ê§°Ü] Ó¦ÓÃ 10 ·ÖÖÓÄÚÃ»ÓÐÆô¶¯¡£ÈÕÖ¾×îºó 20 ÐÐ£º
 :app_print_log
 echo --------------------------------------------
-powershell -NoProfile -Command "$p='%LOG%\app.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { 'ï¼ˆæ²¡æœ‰ app.logï¼‰' }"
+powershell -NoProfile -Command "$p='%LOG%\app.log'; if (Test-Path -LiteralPath $p) { Get-Content -LiteralPath $p -Encoding UTF8 -Tail 20 } else { '£¨Ã»ÓÐ app.log£©' }"
 echo --------------------------------------------
-echo è¯·è¿è¡Œã€Œè¯Šæ–­.cmdã€ï¼ŒæŠŠ logs\è¯Šæ–­æŠ¥å‘Š.txt å‘å›žã€‚
+echo ÇëÔËÐÐ¡¸Õï¶Ï.cmd¡¹£¬°Ñ logs\Õï¶Ï±¨¸æ.txt ·¢»Ø¡£
 pause & exit /b 1
 
 :app_ready
-echo [2/3] åº”ç”¨å·²åœ¨è¿è¡Œï¼ˆç«¯å£ %PORT%ï¼‰
+echo [2/3] Ó¦ÓÃÒÑÔÚÔËÐÐ£¨¶Ë¿Ú %PORT%£©
 
-echo [3/3] æ‰“å¼€æµè§ˆå™¨ ...
+echo [3/3] ´ò¿ªä¯ÀÀÆ÷ ...
 start "" http://127.0.0.1:%PORT%
 
 echo.
 echo ============================================
-echo   å·²å¯åŠ¨ã€‚æµè§ˆå™¨åº”è‡ªåŠ¨æ‰“å¼€:  http://127.0.0.1:%PORT%
-echo   è‹¥æ²¡æœ‰è‡ªåŠ¨æ‰“å¼€ï¼Œè¯·æ‰‹åŠ¨åœ¨æµè§ˆå™¨è¾“å…¥ä¸Šé¢çš„åœ°å€ã€‚
+echo   ÒÑÆô¶¯¡£ä¯ÀÀÆ÷Ó¦×Ô¶¯´ò¿ª:  http://127.0.0.1:%PORT%
+echo   ÈôÃ»ÓÐ×Ô¶¯´ò¿ª£¬ÇëÊÖ¶¯ÔÚä¯ÀÀÆ÷ÊäÈëÉÏÃæµÄµØÖ·¡£
 echo.
-echo   æ³¨æ„: æœ€å°åŒ–çš„ã€Œå£°åˆ»-å¼•æ“Žã€ã€Œå£°åˆ»-åº”ç”¨ã€ä¸¤ä¸ªçª—å£
-echo         æ˜¯æœåŠ¡æœ¬ä½“ï¼Œå…³æŽ‰å®ƒä»¬æœåŠ¡å°±åœäº†ã€‚
+echo   ×¢Òâ: ×îÐ¡»¯µÄ¡¸Éù¿Ì-ÒýÇæ¡¹¡¸Éù¿Ì-Ó¦ÓÃ¡¹Á½¸ö´°¿Ú
+echo         ÊÇ·þÎñ±¾Ìå£¬¹ØµôËüÃÇ·þÎñ¾ÍÍ£ÁË¡£
 echo ============================================
 echo.
 pause

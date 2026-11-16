@@ -1,14 +1,14 @@
 @echo off
+chcp 936 >nul
 rem ============================================================
-rem å¼•æ“åŒ…è£…å™¨ï¼šç”¨ uv å¯åŠ¨ CosyVoice å¹¶æŠŠå®ƒæ‰€æœ‰è¾“å‡ºå†™è¿› logs\engine.log
-rem   Â· ä¾èµ–ç”± engine\CosyVoice\pyproject.toml ç®¡ç†ï¼Œuv sync è‡ªåŠ¨å®‰è£…
-rem   Â· PYTHONPATH æŒ‡å‘ engine\CosyVoiceï¼Œå¦åˆ™ import cosyvoice å¤±è´¥
-rem   Â· -u å…³é—­ç¼“å†²ï¼Œä¿è¯æ—¥å¿—å®æ—¶å†™å…¥
-rem   Â· é€€å‡ºåæ‰“å°é€€å‡ºç å¹¶ pauseï¼Œé˜²æ­¢çª—å£ä¸€é—ªè€Œè¿‡
+rem ÒıÇæ°ü×°Æ÷£ºÓÃ uv Æô¶¯ CosyVoice ²¢°ÑËüËùÓĞÊä³öĞ´½ø logs\engine.log
+rem   ¡¤ ÒÀÀµÓÉ engine\CosyVoice\pyproject.toml ¹ÜÀí£¬uv sync ×Ô¶¯°²×°
+rem   ¡¤ PYTHONPATH Ö¸Ïò engine\CosyVoice£¬·ñÔò import cosyvoice Ê§°Ü
+rem   ¡¤ -u ¹Ø±Õ»º³å£¬±£Ö¤ÈÕÖ¾ÊµÊ±Ğ´Èë
+rem   ¡¤ ÍË³öºó´òÓ¡ÍË³öÂë²¢ pause£¬·ÀÖ¹´°¿ÚÒ»ÉÁ¶ø¹ı
 rem ============================================================
-chcp 65001 >nul
 setlocal
-title å£°åˆ» å¼•æ“ï¼ˆuvï¼‰
+title Éù¿Ì ÒıÇæ£¨uv£©
 set "ROOT=%~dp0"
 set "ENG=%ROOT%engine\CosyVoice"
 set "MODEL=%ENG%\pretrained_models\Fun-CosyVoice3-0.5B"
@@ -23,17 +23,17 @@ set "FP16_ARG="
 if "%COSYVOICE_FP16%"=="1" set "FP16_ARG=--fp16"
 
 if exist "%LOG%\engine.failed" del /q "%LOG%\engine.failed"
-echo.==== %date% %time% å¼•æ“å¯åŠ¨ï¼ˆuvï¼‰==== >> "%LOG%\engine.log"
+echo.==== %date% %time% ÒıÇæÆô¶¯£¨uv£©==== >> "%LOG%\engine.log"
 cd /d "%ENG%" 2>nul || (
-  echo [é”™è¯¯] æ‰¾ä¸åˆ°å¼•æ“ç›®å½•: %ENG%
+  echo [´íÎó] ÕÒ²»µ½ÒıÇæÄ¿Â¼: %ENG%
   pause & exit /b 1
 )
 echo ---- uv sync ---- >> "%LOG%\engine.log"
 uv sync >> "%LOG%\engine.log" 2>&1
 if errorlevel 1 (
   echo.
-  echo [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ï¼ˆuv syncï¼‰ï¼Œè¯¦è§ %LOG%\engine.log
-  echo.==== %date% %time% ä¾èµ–å®‰è£…å¤±è´¥ ==== >> "%LOG%\engine.log"
+  echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¨uv sync£©£¬Ïê¼û %LOG%\engine.log
+  echo.==== %date% %time% ÒÀÀµ°²×°Ê§°Ü ==== >> "%LOG%\engine.log"
   > "%LOG%\engine.failed" echo sync-failed
   pause
   exit /b 1
@@ -43,8 +43,8 @@ uv run python -u -X faulthandler runtime\python\fastapi\server.py --port 50000 -
 set "CODE=%errorlevel%"
 if not "%CODE%"=="0" > "%LOG%\engine.failed" echo exit-%CODE%
 echo. >> "%LOG%\engine.log"
-echo.==== %date% %time% å¼•æ“é€€å‡ºï¼Œé€€å‡ºç  %CODE% ==== >> "%LOG%\engine.log"
+echo.==== %date% %time% ÒıÇæÍË³ö£¬ÍË³öÂë %CODE% ==== >> "%LOG%\engine.log"
 echo.
-echo.[å¼•æ“å·²é€€å‡º] é€€å‡ºç  %CODE%
-echo.æ—¥å¿—: %LOG%\engine.log
+echo.[ÒıÇæÒÑÍË³ö] ÍË³öÂë %CODE%
+echo.ÈÕÖ¾: %LOG%\engine.log
 pause

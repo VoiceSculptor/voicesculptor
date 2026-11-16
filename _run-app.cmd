@@ -1,29 +1,29 @@
 @echo off
+chcp 936 >nul
 rem ============================================================
-rem åº”ç”¨åŒ…è£…å™¨ï¼šç”¨ uv å¯åŠ¨ app.pyï¼ˆå£°åˆ» Studio åŽç«¯ï¼‰ï¼Œè¾“å‡ºå†™è¿› logs\app.log
-rem   Â· ç«¯å£ 8091ï¼›å‰ç«¯é¡µé¢ç”± app.py è‡ªå·±æ‰˜ç®¡
-rem   Â· ä¾èµ–ç”± app\pyproject.toml ç®¡ç†ï¼Œuv sync è‡ªåŠ¨å®‰è£…
-rem   Â· é€€å‡ºåŽæ‰“å°é€€å‡ºç å¹¶ pauseï¼Œä¾¿äºŽçœ‹æŠ¥é”™
+rem Ó¦ÓÃ°ü×°Æ÷£ºÓÃ uv Æô¶¯ app.py£¨Éù¿Ì Studio ºó¶Ë£©£¬Êä³öÐ´½ø logs\app.log
+rem   ¡¤ ¶Ë¿Ú 8091£»Ç°¶ËÒ³ÃæÓÉ app.py ×Ô¼ºÍÐ¹Ü
+rem   ¡¤ ÒÀÀµÓÉ app\pyproject.toml ¹ÜÀí£¬uv sync ×Ô¶¯°²×°
+rem   ¡¤ ÍË³öºó´òÓ¡ÍË³öÂë²¢ pause£¬±ãÓÚ¿´±¨´í
 rem ============================================================
-chcp 65001 >nul
 setlocal
-title å£°åˆ» Studio åº”ç”¨ï¼ˆuvï¼‰
+title Éù¿Ì Studio Ó¦ÓÃ£¨uv£©
 set "ROOT=%~dp0"
 set "LOG=%ROOT%logs"
 if not exist "%LOG%" mkdir "%LOG%"
 set "PYTHONUTF8=1"
 
 if exist "%LOG%\app.failed" del /q "%LOG%\app.failed"
-echo ==== %date% %time% åº”ç”¨å¯åŠ¨ï¼ˆuvï¼‰==== >> "%LOG%\app.log"
+echo ==== %date% %time% Ó¦ÓÃÆô¶¯£¨uv£©==== >> "%LOG%\app.log"
 cd /d "%ROOT%app" 2>nul || (
-  echo [é”™è¯¯] æ‰¾ä¸åˆ°åº”ç”¨ç›®å½•: %ROOT%app
+  echo [´íÎó] ÕÒ²»µ½Ó¦ÓÃÄ¿Â¼: %ROOT%app
   pause & exit /b 1
 )
 echo ---- uv sync ---- >> "%LOG%\app.log"
 uv sync >> "%LOG%\app.log" 2>&1
 if errorlevel 1 (
   echo.
-  echo [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ï¼ˆuv syncï¼‰ï¼Œè¯¦è§ %LOG%\app.log
+  echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¨uv sync£©£¬Ïê¼û %LOG%\app.log
   > "%LOG%\app.failed" echo sync-failed
   pause
   exit /b 1
@@ -33,8 +33,8 @@ uv run python -u app.py --port 8091 >> "%LOG%\app.log" 2>&1
 set "CODE=%errorlevel%"
 if not "%CODE%"=="0" > "%LOG%\app.failed" echo exit-%CODE%
 echo. >> "%LOG%\app.log"
-echo ==== %date% %time% åº”ç”¨é€€å‡ºï¼Œé€€å‡ºç  %CODE% ==== >> "%LOG%\app.log"
+echo ==== %date% %time% Ó¦ÓÃÍË³ö£¬ÍË³öÂë %CODE% ==== >> "%LOG%\app.log"
 echo.
-echo [åº”ç”¨å·²é€€å‡º] é€€å‡ºç  %CODE%
-echo æ—¥å¿—: %LOG%\app.log
+echo [Ó¦ÓÃÒÑÍË³ö] ÍË³öÂë %CODE%
+echo ÈÕÖ¾: %LOG%\app.log
 pause
