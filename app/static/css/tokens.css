@@ -1,0 +1,148 @@
+/* Design tokens: the single source of colour, type and spacing values. */
+
+:root {
+  --vs-font-sans: 'Noto Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'PingFang SC', system-ui, sans-serif;
+  --vs-font-mono: 'Cascadia Mono', 'JetBrains Mono', consolas, monospace;
+  --vs-font-size-xs: 12px;
+  --vs-font-size-sm: 13px;
+  --vs-font-size-md: 14px;
+  --vs-font-size-lg: 16px;
+  --vs-font-size-xl: 20px;
+  --vs-font-size-xxl: 28px;
+  --vs-line-height: 1.55;
+  --vs-weight-regular: 400;
+  --vs-weight-medium: 500;
+  --vs-weight-bold: 600;
+  --vs-space-1: 4px;
+  --vs-space-2: 8px;
+  --vs-space-3: 12px;
+  --vs-space-4: 16px;
+  --vs-space-5: 24px;
+  --vs-space-6: 32px;
+  --vs-radius-sm: 8px;
+  --vs-radius-md: 12px;
+  --vs-radius-lg: 16px;
+  --vs-radius-pill: 999px;
+  --vs-motion: 150ms cubic-bezier(.2, 0, 0, 1);
+  --vs-topbar-height: 56px;
+  --vs-sidebar-width: 300px;
+  --vs-content-max: 960px;
+
+  /* dark theme (default) */
+  --vs-color-bg: #0f1115;
+  --vs-color-surface: #171a21;
+  --vs-color-surface-2: #1f2430;
+  --vs-color-surface-3: #282e3b;
+  --vs-color-outline: #343b4a;
+  --vs-color-text: #e8eaf0;
+  --vs-color-text-muted: #9aa3b5;
+  --vs-color-primary: #8ab4f8;
+  --vs-color-primary-hover: #aecbfa;
+  --vs-color-on-primary: #0b1d3a;
+  --vs-color-primary-container: #1f3a66;
+  --vs-color-on-primary-container: #d7e3ff;
+  --vs-color-primary-soft: rgba(138, 180, 248, .14);
+  --vs-color-success: #81c995;
+  --vs-color-warning: #fdd663;
+  --vs-color-danger: #f28b82;
+  --vs-color-on-danger: #2b0d0b;
+  --vs-color-focus: #8ab4f8;
+  --vs-color-success-soft: rgba(129, 201, 149, .14);
+  --vs-color-warning-soft: rgba(253, 214, 99, .14);
+  --vs-color-danger-soft: rgba(242, 139, 130, .14);
+  --vs-color-hover: rgba(232, 234, 240, .06);
+  --vs-color-scrim: rgba(0, 0, 0, .62);
+  --vs-shadow-1: 0 1px 2px rgba(0, 0, 0, .4),
+    0 1px 3px 1px rgba(0, 0, 0, .2);
+  --vs-shadow-2: 0 8px 24px rgba(0, 0, 0, .5);
+
+  /* emotion palette: identical slugs in chips, cards and score bars */
+  --vs-emotion-coquettish: #f8a5c2;
+  --vs-emotion-happy: #fdd663;
+  --vs-emotion-sad: #8ab4f8;
+  --vs-emotion-angry: #f28b82;
+  --vs-emotion-calm: #81c995;
+  --vs-emotion-surprise: #c58af9;
+
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --vs-color-bg: #f8f9fb;
+  --vs-color-surface: #fff;
+  --vs-color-surface-2: #f1f3f6;
+  --vs-color-surface-3: #e8eaed;
+  --vs-color-outline: #dadce0;
+  --vs-color-text: #202124;
+  --vs-color-text-muted: #5f6368;
+  --vs-color-primary: #1a73e8;
+  --vs-color-primary-hover: #1765cc;
+  --vs-color-on-primary: #fff;
+  --vs-color-primary-container: #d2e3fc;
+  --vs-color-on-primary-container: #041e49;
+  --vs-color-primary-soft: rgba(26, 115, 232, .08);
+  --vs-color-success: #188038;
+  --vs-color-warning: #b06000;
+  --vs-color-danger: #d93025;
+  --vs-color-on-danger: #fff;
+  --vs-color-focus: #1a73e8;
+  --vs-color-success-soft: rgba(24, 128, 56, .10);
+  --vs-color-warning-soft: rgba(176, 96, 0, .10);
+  --vs-color-danger-soft: rgba(217, 48, 37, .10);
+  --vs-color-hover: rgba(32, 33, 36, .05);
+  --vs-color-scrim: rgba(32, 33, 36, .32);
+  --vs-shadow-1: 0 1px 2px rgba(60, 64, 67, .3),
+    0 1px 3px 1px rgba(60, 64, 67, .15);
+  --vs-shadow-2: 0 8px 24px rgba(60, 64, 67, .22);
+
+  --vs-emotion-coquettish: #d01884;
+  --vs-emotion-happy: #b06000;
+  --vs-emotion-sad: #1967d2;
+  --vs-emotion-angry: #c5221f;
+  --vs-emotion-calm: #137333;
+  --vs-emotion-surprise: #8430ce;
+
+  color-scheme: light;
+}
+
+/* Follow the system only when no theme has been chosen yet. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+    --vs-color-bg: #f8f9fb;
+    --vs-color-surface: #fff;
+    --vs-color-surface-2: #f1f3f6;
+    --vs-color-surface-3: #e8eaed;
+    --vs-color-outline: #dadce0;
+    --vs-color-text: #202124;
+    --vs-color-text-muted: #5f6368;
+    --vs-color-primary: #1a73e8;
+    --vs-color-primary-hover: #1765cc;
+    --vs-color-on-primary: #fff;
+    --vs-color-primary-container: #d2e3fc;
+    --vs-color-on-primary-container: #041e49;
+    --vs-color-primary-soft: rgba(26, 115, 232, .08);
+    --vs-color-success: #188038;
+    --vs-color-warning: #b06000;
+    --vs-color-danger: #d93025;
+    --vs-color-on-danger: #fff;
+    --vs-color-focus: #1a73e8;
+    --vs-color-success-soft: rgba(24, 128, 56, .10);
+    --vs-color-warning-soft: rgba(176, 96, 0, .10);
+    --vs-color-danger-soft: rgba(217, 48, 37, .10);
+    --vs-color-hover: rgba(32, 33, 36, .05);
+    --vs-color-scrim: rgba(32, 33, 36, .32);
+    --vs-shadow-1: 0 1px 2px rgba(60, 64, 67, .3),
+      0 1px 3px 1px rgba(60, 64, 67, .15);
+    --vs-shadow-2: 0 8px 24px rgba(60, 64, 67, .22);
+
+    --vs-emotion-coquettish: #d01884;
+    --vs-emotion-happy: #b06000;
+    --vs-emotion-sad: #1967d2;
+    --vs-emotion-angry: #c5221f;
+    --vs-emotion-calm: #137333;
+    --vs-emotion-surprise: #8430ce;
+
+    color-scheme: light;
+  }
+}

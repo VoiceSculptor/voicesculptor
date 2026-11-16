@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>声刻 Studio · 本地语音克隆</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/layout.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+  <script type="module" src="/static/js/main.js"></script>
+</head>
+<body>
+  <div class="vs-app">
+    <header class="vs-topbar">
+      <div class="vs-brand">
+        <span class="vs-brand-mark" aria-hidden="true">声</span>
+        <span class="vs-brand-text">
+          <span class="vs-brand-name">声刻 Studio</span>
+          <span class="vs-brand-sub">本地语音克隆</span>
+        </span>
+      </div>
+      <div class="vs-topbar-actions">
+        <button type="button" class="vs-status-chip" id="status-chip"
+            data-level="pending" title="环境状态，点击查看详情">
+          <span class="vs-status-dot" aria-hidden="true"></span>
+          <span class="vs-status-text" id="status-text">检测中</span>
+        </button>
+        <button type="button" class="vs-icon-button" id="theme-toggle"
+            aria-label="切换主题" title="切换主题">
+          <span class="vs-theme-glyph" id="theme-glyph"
+              aria-hidden="true">☾</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="vs-banners">
+      <p class="vs-banner vs-banner--error" id="conn-banner" role="alert"
+          hidden>
+        <strong class="vs-banner-title">无法连接后端服务</strong>
+        <span class="vs-banner-text" id="conn-banner-text"></span>
+      </p>
+      <p class="vs-banner vs-banner--warn" id="cap-banner" role="status"
+          hidden>
+        <strong class="vs-banner-title" id="cap-banner-title"></strong>
+        <span class="vs-banner-text" id="cap-banner-text"></span>
+      </p>
+    </div>
+
+    <aside class="vs-sidebar" aria-labelledby="sidebar-title">
+      <nav class="vs-nav" aria-label="主导航">
+        <button type="button" class="vs-nav-item" data-view="synth"
+            aria-current="page">
+          <span class="vs-nav-icon" aria-hidden="true">✎</span>
+          <span class="vs-nav-label">合成</span>
+        </button>
+        <button type="button" class="vs-nav-item" data-view="emotion">
+          <span class="vs-nav-icon" aria-hidden="true">◉</span>
+          <span class="vs-nav-label">情绪识别</span>
+        </button>
+        <button type="button" class="vs-nav-item" data-view="audit">
+          <span class="vs-nav-icon" aria-hidden="true">✓</span>
+          <span class="vs-nav-label">素材体检</span>
+        </button>
+        <button type="button" class="vs-nav-item" data-view="env">
+          <span class="vs-nav-icon" aria-hidden="true">◎</span>
+          <span class="vs-nav-label">环境检测</span>
+        </button>
+      </nav>
+      <div class="vs-sidebar-head">
+        <h2 class="vs-sidebar-title" id="sidebar-title">音色库</h2>
+        <span class="vs-count" id="voice-count" aria-live="polite">0</span>
+        <button type="button" class="vs-button vs-button--tonal vs-button--sm"
+            id="new-voice">新建音色</button>
+      </div>
+      <div class="vs-voice-list" id="voice-list"></div>
+    </aside>
+
+    <main class="vs-main" id="main">
+      <section class="vs-view" id="view-synth"
+          aria-labelledby="view-synth-title">
+        <div class="vs-view-head">
+          <h1 class="vs-view-title" id="view-synth-title">合成</h1>
+          <p class="vs-view-lead">选一个音色，写下文本，挑一种情绪，然后生成。</p>
+        </div>
+        <div class="vs-view-body" id="synth-root"></div>
+      </section>
+
+      <section class="vs-view" id="view-emotion"
+          aria-labelledby="view-emotion-title" hidden>
+        <div class="vs-view-head">
+          <h1 class="vs-view-title" id="view-emotion-title">情绪识别</h1>
+          <p class="vs-view-lead">上传一段音频，看看模型听到的是什么情绪。</p>
+        </div>
+        <div class="vs-view-body" id="emotion-root"></div>
+      </section>
+
+      <section class="vs-view" id="view-audit"
+          aria-labelledby="view-audit-title" hidden>
+        <div class="vs-view-head">
+          <h1 class="vs-view-title" id="view-audit-title">素材体检</h1>
+          <p class="vs-view-lead">给一个录音目录，检查时长、采样率、信噪比与可用性。</p>
+        </div>
+        <div class="vs-view-body" id="audit-root"></div>
+      </section>
+
+      <section class="vs-view" id="view-env"
+          aria-labelledby="view-env-title" hidden>
+        <div class="vs-view-head">
+          <h1 class="vs-view-title" id="view-env-title">环境检测</h1>
+          <p class="vs-view-lead">12 项检测，判断每个功能当前是否可用。</p>
+        </div>
+        <div class="vs-view-body" id="env-root"></div>
+      </section>
+    </main>
+
+    <footer class="vs-log-drawer" id="log-drawer" data-open="false"
+        aria-label="运行日志">
+      <div class="vs-log-head">
+        <button type="button" class="vs-log-toggle" id="log-toggle"
+            aria-expanded="false" aria-controls="log-list">
+          <span class="vs-log-caret" aria-hidden="true">▸</span>
+          <span class="vs-log-title">运行日志</span>
+          <span class="vs-log-count" id="log-count">0</span>
+        </button>
+        <button type="button" class="vs-button vs-button--text vs-button--sm"
+            id="log-clear">清空</button>
+      </div>
+      <ol class="vs-log-list" id="log-list" aria-live="polite"
+          aria-relevant="additions"></ol>
+    </footer>
+  </div>
+
+  <div class="vs-toasts" id="toasts" aria-live="polite"></div>
+
+  <dialog class="vs-dialog" id="voice-dialog"
+      aria-labelledby="voice-dialog-title"></dialog>
+
+  <noscript>
+    <p class="vs-noscript">声刻 Studio 需要启用 JavaScript 才能运行。</p>
+  </noscript>
+</body>
+</html>
