@@ -24,3 +24,18 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 torchaudio = { index = "pytorch-cu128" }
+
+[dependency-groups]
+test = ["pytest>=8.3", "httpx>=0.28", "pylint>=3.3", "yapf>=0.43", "isort>=5.13"]
+
+[tool.yapf]
+based_on_style = "google"
+column_limit = 80
+
+[tool.isort]
+profile = "google"
+line_length = 80
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
