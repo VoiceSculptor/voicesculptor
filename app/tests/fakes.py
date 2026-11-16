@@ -9,10 +9,11 @@ import socket
 import threading
 import time
 
+from fastapi import FastAPI
+from fastapi import Request
+from fastapi.responses import Response
 import numpy as np
 import uvicorn
-from fastapi import FastAPI, Request
-from fastapi.responses import Response
 
 SAMPLE_RATE = 24000
 CLIP_SECONDS = 1.5
@@ -72,8 +73,12 @@ def make_fake_emotion(label='happy', cn='开心'):
 
     @app.post('/emotion')
     def emotion():
-        return {'label': label, 'cn': cn, 'scores': scores,
-                'cn_scores': cn_scores}
+        return {
+            'label': label,
+            'cn': cn,
+            'scores': scores,
+            'cn_scores': cn_scores
+        }
 
     return app
 
@@ -87,7 +92,8 @@ def run_in_thread(app):
     port = sock.getsockname()[1]
     config = uvicorn.Config(app, log_level='warning', lifespan='off')
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, kwargs={'sockets': [sock]},
+    thread = threading.Thread(target=server.run,
+                              kwargs={'sockets': [sock]},
                               daemon=True)
     thread.start()
     deadline = time.time() + 15

@@ -4,10 +4,10 @@ import base64
 import io
 import os
 
+from fastapi.testclient import TestClient
 import numpy as np
 import pytest
 import soundfile as sf
-from fastapi.testclient import TestClient
 
 import app as legacy
 
@@ -29,11 +29,15 @@ def _wav_bytes(seconds=6.0, sr=24000, freq=180.0):
 @pytest.fixture(scope='module')
 def sample_voice():
     """建一个临时音色，测试结束后删除。"""
-    resp = client.post(
-        '/api/voices',
-        data={'name': '特征测试', 'prompt': '你好', 'emotion': '平静',
-              'emoji': 'T', 'group': ''},
-        files={'ref': ('ref.wav', _wav_bytes(), 'audio/wav')})
+    resp = client.post('/api/voices',
+                       data={
+                           'name': '特征测试',
+                           'prompt': '你好',
+                           'emotion': '平静',
+                           'emoji': 'T',
+                           'group': ''
+                       },
+                       files={'ref': ('ref.wav', _wav_bytes(), 'audio/wav')})
     assert resp.status_code == 200, resp.text
     meta = resp.json()
     assert 'warnings' in meta
@@ -61,17 +65,19 @@ def test_voices_list_shape():
     assert isinstance(voices, list)
     for meta in voices:
         assert 'voice_id' in meta
-        assert os.path.isdir(
-            os.path.join(legacy.VOICE_DIR, meta['voice_id']))
+        assert os.path.isdir(os.path.join(legacy.VOICE_DIR, meta['voice_id']))
         assert os.path.isfile(
             os.path.join(legacy.VOICE_DIR, meta['voice_id'], 'ref.wav'))
 
 
 def test_create_and_delete_voice():
-    resp = client.post(
-        '/api/voices',
-        data={'name': '临时', 'prompt': '', 'emotion': '开心'},
-        files={'ref': ('ref.wav', _wav_bytes(3.0), 'audio/wav')})
+    resp = client.post('/api/voices',
+                       data={
+                           'name': '临时',
+                           'prompt': '',
+                           'emotion': '开心'
+                       },
+                       files={'ref': ('ref.wav', _wav_bytes(3.0), 'audio/wav')})
     assert resp.status_code == 200, resp.text
     meta = resp.json()
     vid = meta['voice_id']
@@ -87,42 +93,47 @@ def test_delete_missing_voice_404():
 
 
 def test_create_voice_rejects_short_audio():
-    resp = client.post(
-        '/api/voices',
-        data={'name': '太短', 'emotion': '平静'},
-        files={'ref': ('ref.wav', _wav_bytes(0.2), 'audio/wav')})
+    resp = client.post('/api/voices',
+                       data={
+                           'name': '太短',
+                           'emotion': '平静'
+                       },
+                       files={'ref': ('ref.wav', _wav_bytes(0.2), 'audio/wav')})
     assert resp.status_code == 422
 
 
 def test_tts_text_too_long_422(sample_voice):
-    resp = client.post('/api/tts', data={
-        'voice_id': sample_voice['voice_id'],
-        'text': '啊' * (legacy.MAX_TEXT_CHARS + 1),
-        'mode': 'zero_shot',
-    })
+    resp = client.post('/api/tts',
+                       data={
+                           'voice_id': sample_voice['voice_id'],
+                           'text': '啊' * (legacy.MAX_TEXT_CHARS + 1),
+                           'mode': 'zero_shot',
+                       })
     assert resp.status_code == 422
 
 
 def test_tts_bad_mode_422(sample_voice):
-    resp = client.post('/api/tts', data={
-        'voice_id': sample_voice['voice_id'],
-        'text': '你好',
-        'mode': 'nope',
-    })
+    resp = client.post('/api/tts',
+                       data={
+                           'voice_id': sample_voice['voice_id'],
+                           'text': '你好',
+                           'mode': 'nope',
+                       })
     assert resp.status_code == 422
 
 
 @pytest.mark.skipif(not HAS_MODEL, reason='缺少 campplus.onnx')
 def test_tts_normal_path(sample_voice):
-    resp = client.post('/api/tts', data={
-        'voice_id': sample_voice['voice_id'],
-        'text': '你好',
-        'emotion': '平静',
-        'mode': 'zero_shot',
-        'quality': 'balanced',
-        'best_n': 1,
-        'verify': 'false',
-    })
+    resp = client.post('/api/tts',
+                       data={
+                           'voice_id': sample_voice['voice_id'],
+                           'text': '你好',
+                           'emotion': '平静',
+                           'mode': 'zero_shot',
+                           'quality': 'balanced',
+                           'best_n': 1,
+                           'verify': 'false',
+                       })
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert 'audio_base64' in body
@@ -131,5 +142,5 @@ def test_tts_normal_path(sample_voice):
     assert len(raw) > 1000
     assert 'duration' in body and body['duration'] > 0
     assert body['engine'] == 'cosyvoice'
-    assert body['mode'] in ('zero_shot', 'cross_lingual', 'instruct2',
-                            'hybrid', 'split')
+    assert body['mode'] in ('zero_shot', 'cross_lingual', 'instruct2', 'hybrid',
+                            'split')

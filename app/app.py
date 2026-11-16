@@ -45,7 +45,6 @@ import logging
 import os
 import re
 import shutil
-import struct
 import threading
 import time
 import uuid
@@ -59,6 +58,12 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+
+from voicesculptor import audit as audit_report
+from voicesculptor import emotions
+from voicesculptor.audio import preprocess
+from voicesculptor.audio import prosody
+from voicesculptor.audio import wav as wav_utils
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 VOICE_DIR = os.path.join(APP_DIR, 'voices')
@@ -134,40 +139,6 @@ def embed(path):
 # ------------------------------------------------------------
 def sim(a, b):
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-9))
-
-
-# ------------------------------------------------------------
-# 把 CosyVoice 返回的裸 PCM（16bit 单声道 24k）包装成标准 WAV 头
-# ------------------------------------------------------------
-def wrap_wav(pcm_bytes, sr=24000):
-    return (b'RIFF' + struct.pack('<I', 36 + len(pcm_bytes)) + b'WAVEfmt '
-            + struct.pack('<IHHIIHH', 16, 1, 1, sr, sr * 2, 2, 16)
-            + b'data' + struct.pack('<I', len(pcm_bytes)) + pcm_bytes)
-
-
-# ------------------------------------------------------------
-# 参考音频预处理（对齐 CosyVoice 官方 webui 的 postprocess）：
-#   去首尾静音（相对峰值 -50dB，两端各留 0.1s）-> 峰值归一化 -> 尾部补 0.2s 静音
-# ------------------------------------------------------------
-def preprocess_ref(wav, sr):
-    wav = np.asarray(wav, dtype=np.float32)
-    frame, hop = max(1, int(sr * 0.025)), max(1, int(sr * 0.010))
-    if len(wav) > frame:
-        n = 1 + (len(wav) - frame) // hop
-        rms = np.array([np.sqrt(np.mean(wav[i * hop:i * hop + frame] ** 2)) for i in range(n)])
-        db = 20 * np.log10(rms + 1e-10)
-        idx = np.where(db > db.max() - 50)[0]
-        if len(idx):
-            pad = int(sr * 0.1)
-            s = max(0, idx[0] * hop - pad)
-            e = min(len(wav), idx[-1] * hop + frame + pad)
-            wav = wav[s:e]
-    peak = float(np.abs(wav).max()) if len(wav) else 0.0
-    if peak > 0.8:
-        wav = wav / peak * 0.8
-    elif 0 < peak < 0.2:
-        wav = wav / peak * 0.6
-    return np.concatenate([wav, np.zeros(int(sr * 0.2), dtype=np.float32)])
 
 
 # ------------------------------------------------------------
@@ -287,7 +258,7 @@ def seed_defaults():
         w, s = sf.read(ref, dtype='float32')
         if w.ndim > 1:
             w = w.mean(axis=1)
-        sf.write(os.path.join(d, 'ref.wav'), preprocess_ref(w, s), s)
+        sf.write(os.path.join(d, 'ref.wav'), preprocess.preprocess_reference(w, s), s)
         meta = dict(voice_id=vid, name=name, prompt=prompt, emoji='★',
                     created=time.strftime('%Y-%m-%d %H:%M:%S'), source='seed',
                     emotion=name, group='roxy', preproc=1)
@@ -295,17 +266,8 @@ def seed_defaults():
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
 
-EMOTION_INSTRUCT = {
-    '撒娇': 'You are a helpful assistant. 请用非常可爱、撒娇的语气说一句话。',
-    '开心': 'You are a helpful assistant. 请非常开心地说一句话。',
-    '难过': 'You are a helpful assistant. 请非常伤心地说一句话。',
-    '生气': 'You are a helpful assistant. 请非常生气地说一句话。',
-    '平静': 'You are a helpful assistant. 请用平静、温柔的语气慢慢说一句话。',
-    '惊讶': 'You are a helpful assistant. 请用非常惊讶、意外的语气说一句话。',
-}
-
-
 # ------------------------------------------------------------
+# 引擎侧 zero_shot# ------------------------------------------------------------
 # 引擎侧 zero_shot 说话人缓存：首次注册，之后直接按 spk_id 合成，
 # 省掉每次请求重复提取 speech token / fbank / 说话人向量的开销
 # ------------------------------------------------------------
@@ -339,9 +301,6 @@ def _zero_shot_cached(spk, ref_path, prompt_full, text, speed):
     return r.content
 
 
-EMO_CODE = {'撒娇': 'coq', '开心': 'hap', '难过': 'sad', '生气': 'ang', '平静': 'cal', '惊讶': 'sur'}
-
-
 # ------------------------------------------------------------
 # 调用一次 CosyVoice。kind:
 #   zero_shot     参考音 + 转录（LLM/flow 两端都用 prompt，音色最好）
@@ -364,7 +323,7 @@ def synth_once(kind, ref_path, prompt, text, instruct, speed=1.0, emo_ref=None, 
         return _zero_shot_cached(_spk_id(ref_path), ref_path,
                                  'You are a helpful assistant.<|endofprompt|>' + prompt, text, speed)
     if kind == 'hybrid':
-        code = next((c for e, c in EMO_CODE.items() if EMOTION_INSTRUCT.get(e) == instruct), None) \
+        code = next((c for e, c in emotions.EMO_CODE.items() if emotions.EMOTION_INSTRUCT.get(e) == instruct), None) \
             or 'x' + hashlib.md5(instruct.encode('utf-8')).hexdigest()[:8]
         return _zero_shot_cached(_spk_id(ref_path) + '_' + code, ref_path,
                                  instruct + '<|endofprompt|>' + prompt, text, speed)
@@ -417,33 +376,6 @@ def detect_emotion(wav_bytes):
     except Exception as e:
         LOG.info('情绪服务不可用: %s', e)
     return None
-
-
-# ------------------------------------------------------------
-# 粗略估一段 24k PCM 的音高起伏与能量起伏，用于 best 择优时判断情绪强弱
-# ------------------------------------------------------------
-def prosody(pcm):
-    y = np.frombuffer(pcm, dtype='<i2').astype(np.float32) / 32768.0
-    try:
-        t = torch.from_numpy(np.ascontiguousarray(y)).unsqueeze(0)
-        f0 = torchaudio.functional.detect_pitch_frequency(t, 24000, freq_low=70, freq_high=500).flatten().numpy()
-        f0 = f0[(f0 > 70) & (f0 < 500)]
-        rng = float(np.percentile(f0, 90) - np.percentile(f0, 10)) if len(f0) else 0.0
-    except Exception:
-        rng = 0.0
-    n = len(y) // 240 * 240
-    rms = np.sqrt((y[:n].reshape(-1, 240) ** 2).mean(axis=1)) if n else np.zeros(1)
-    return rng, float(rms.std())
-
-
-# 情绪强度的方向：+1 越大越有情绪，-1 越平稳越像
-AROUSAL = {'撒娇': 1, '开心': 1, '生气': 1, '惊讶': 1, '难过': -1, '平静': -1}
-
-
-def _z(values):
-    m = sum(values) / len(values)
-    sd = (sum((v - m) ** 2 for v in values) / len(values)) ** 0.5 or 1.0
-    return [(v - m) / sd for v in values]
 
 
 # --------------------------------------------------------------------
@@ -505,12 +437,12 @@ async def create_voice(name: str = Form(...), prompt: str = Form(''),
     src_dur = len(wav) / float(sr or 1)
     if not 0.5 <= src_dur <= 30:
         raise HTTPException(422, '参考音频时长需在 0.5~30 秒（当前 %.2f 秒）' % src_dur)
-    wav = preprocess_ref(wav, sr)
+    wav = preprocess.preprocess_reference(wav, sr)
     dur = len(wav) / float(sr or 1) - 0.2  # 去掉 preprocess_ref 尾部补的 0.2s 静音
     if dur < 0.3:
         raise HTTPException(422, '参考音频有效语音过短（去静音后 %.2f 秒）' % dur)
-    if emotion not in EMOTION_INSTRUCT:
-        raise HTTPException(422, 'emotion 只能是: ' + '/'.join(EMOTION_INSTRUCT))
+    if emotion not in emotions.EMOTION_INSTRUCT:
+        raise HTTPException(422, 'emotion 只能是: ' + '/'.join(emotions.EMOTION_INSTRUCT))
     group = group.strip()
     if group and not re.fullmatch(r'[A-Za-z0-9_\-\u4e00-\u9fff]{1,32}', group):
         raise HTTPException(422, 'group 只能含中英文、数字、_ -，最长 32')
@@ -618,7 +550,7 @@ def _tts_impl(voice_id: str = Form(...), text: str = Form(...), emotion: str = F
         if not emo_prompt:
             raise HTTPException(422, '情绪参考音色缺少转录文本，split 模式不可用')
     prompt = (ref_meta.get('prompt') or '').strip()
-    emotion_prompt = instruct_text or EMOTION_INSTRUCT.get(emotion)
+    emotion_prompt = instruct_text or emotions.EMOTION_INSTRUCT.get(emotion)
     instruct = emotion_prompt if kind in ('instruct2', 'hybrid') else None
     if kind in ('instruct2', 'hybrid') and not instruct:
         kind = 'zero_shot'
@@ -714,13 +646,13 @@ def _tts_impl(voice_id: str = Form(...), text: str = Form(...), emotion: str = F
         except Exception as e:
             LOG.warning('相似度计算失败: %s', e)
             s = None
-        det = detect_emotion(wrap_wav(c, 24000)) if use_emo_rank else None
-        scored.append({'pcm': c, 'sim': s, 'expr': prosody(c), 'det': det})
-    if use_emo_rank and emotion in AROUSAL:
-        sign = AROUSAL[emotion]
-        z_rng = _z([x['expr'][0] for x in scored])
-        z_rms = _z([x['expr'][1] for x in scored])
-        z_sim = _z([x['sim'] if x['sim'] is not None else 0.0 for x in scored])
+        det = detect_emotion(wav_utils.wrap_wav(c, 24000)) if use_emo_rank else None
+        scored.append({'pcm': c, 'sim': s, 'expr': prosody.prosody(c), 'det': det})
+    if use_emo_rank and emotion in emotions.AROUSAL:
+        sign = emotions.AROUSAL[emotion]
+        z_rng = prosody.zscore([x['expr'][0] for x in scored])
+        z_rms = prosody.zscore([x['expr'][1] for x in scored])
+        z_sim = prosody.zscore([x['sim'] if x['sim'] is not None else 0.0 for x in scored])
         for i, x in enumerate(scored):
             x['rank'] = sign * (0.6 * z_rng[i] + 0.4 * z_rms[i]) + 0.3 * z_sim[i]
     else:
@@ -738,7 +670,7 @@ def _tts_impl(voice_id: str = Form(...), text: str = Form(...), emotion: str = F
         raise HTTPException(502, '合成失败：引擎返回空音频')
     best = max(scored, key=lambda x: x['rank'])
     best_pcm, best_s = best['pcm'], best['sim']
-    wav = wrap_wav(best_pcm, 24000)
+    wav = wav_utils.wrap_wav(best_pcm, 24000)
     duration = len(best_pcm) / 2 / 24000
     # verify 只决定是否展示情绪结果；是否参与择优由 EMOTION_RANK 决定
     detected = best['det'] if use_emo_rank else (detect_emotion(wav) if verify else None)
@@ -763,74 +695,6 @@ def _tts_impl(voice_id: str = Form(...), text: str = Form(...), emotion: str = F
 # ------------------------------------------------------------
 # 素材体检：逐个音频统计时长、采样率、声道、信噪比与可用性结论
 # ------------------------------------------------------------
-def audit_folder(dir_path):
-    """轻量素材体检：时长 / 采样率 / 声道 / SNR / 总量 + 结论"""
-    rows = []
-    try:
-        names = sorted(os.listdir(dir_path))
-    except OSError as e:
-        raise HTTPException(500, '无法读取目录: ' + str(e))
-    for fn in names:
-        if not fn.lower().endswith(('.wav', '.mp3', '.m4a', '.flac', '.ogg')):
-            continue
-        p = os.path.join(dir_path, fn)
-        try:
-            info = sf.info(p)
-            dur = info.frames / float(info.samplerate)
-            sr, ch = info.samplerate, info.channels
-        except Exception:
-            continue
-        snr = 0.0
-        try:
-            w, _ = sf.read(p, dtype='float32')
-            if w.ndim > 1:
-                w = w.mean(axis=1)
-            frame = max(1, int(sr * 0.02))
-            n = len(w) // frame
-            if n >= 10:
-                rms = np.array([float(np.sqrt(np.mean(w[i * frame:(i + 1) * frame] ** 2)) + 1e-9)
-                                for i in range(n)])
-                noise = max(float(np.percentile(rms, 10)), 1e-6)
-                speech = max(float(np.percentile(rms, 90)), noise)
-                snr = float(20 * np.log10(speech / noise))
-                snr = max(0.0, min(60.0, snr))
-        except Exception:
-            pass
-        rows.append(dict(file=fn, dur=round(dur, 2), sr=sr, ch=ch, snr=round(snr, 1)))
-
-    total = sum(r['dur'] for r in rows)
-    usable = sum(r['dur'] for r in rows if 2 <= r['dur'] <= 12)
-    snrs = [r['snr'] for r in rows if r['snr'] > 0]
-    med_snr = float(np.median(snrs)) if snrs else 0.0
-    if usable / 60 >= 30 and med_snr >= 25:
-        verdict = '优秀：可直接做全量 SFT'
-    elif usable / 60 >= 10 and med_snr >= 15:
-        verdict = '良好：可做 LoRA 微调'
-    elif usable / 60 >= 3:
-        verdict = '及格：可做零样本 + 少量微调'
-    else:
-        verdict = '不足：建议重录（目标 ≥ 10 分钟有效语音）'
-
-    lines = ['# 素材体检报告', '',
-             '| 项目 | 数值 |', '|---|---|',
-             '| 文件数 | %d |' % len(rows),
-             '| 总时长 | %.1f 分钟 |' % (total / 60),
-             '| 有效片段（2~12 秒） | %.1f 分钟 |' % (usable / 60),
-             '| 中位信噪比 | %.1f dB |' % med_snr,
-             '| 采样率/声道 | %s / %s |' % (
-                 '/'.join(sorted({str(r['sr']) for r in rows})) or '-',
-                 '/'.join(sorted({str(r['ch']) for r in rows})) or '-'),
-             '', '**结论**：' + verdict, '',
-             '| 文件 | 时长 | 采样率 | 声道 | SNR |', '|---|---|---|---|---|']
-    for r in rows[:60]:
-        lines.append('| %s | %.1fs | %d | %d | %.1fdB |' % (r['file'], r['dur'], r['sr'], r['ch'], r['snr']))
-    if len(rows) > 60:
-        lines.append('| …（其余 %d 个文件省略） | | | | |' % (len(rows) - 60))
-    return '\n'.join(lines), dict(files=len(rows), total_min=round(total / 60, 1),
-                                  usable_min=round(usable / 60, 1),
-                                  median_snr=round(med_snr, 1), verdict=verdict)
-
-
 # --------------------------------------------------------------------
 # 接口: @app.post('/api/audit')
 # 作用: 接口：对指定目录做体检，返回 markdown 报告
@@ -839,7 +703,7 @@ def audit_folder(dir_path):
 def audit(dir_path: str = Form(...)):
     if not os.path.isdir(dir_path):
         raise HTTPException(422, '目录不存在: ' + dir_path)
-    report, summary = audit_folder(dir_path)
+    report, summary = audit_report.audit_folder(dir_path)
     report_dir = os.path.join(QA, 'logs')
     os.makedirs(report_dir, exist_ok=True)
     report_path = os.path.join(report_dir, 'audit-report.md')
