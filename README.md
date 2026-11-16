@@ -136,7 +136,7 @@ cd app
 |---|---|
 | `voice_dir` | 创建音色目录并确认可写 |
 | `broken_voices` | 把损坏目录移到 `voices/.broken/<id>-<时间戳>`，不删除 |
-| `packages` / `torch_cuda` / `audio_formats` | 在 app 目录执行 `uv sync`（需要 uv 在 PATH） |
+| `packages` / `torch_cuda` / `audio_formats` | 在 app 目录执行 `uv sync --inexact`（需要 uv 在 PATH） |
 | `python` | `uv python install 3.11` |
 | `model_files` | 默认只提示；加 `--download-models` 才下载约 5.1 GB 权重 |
 
