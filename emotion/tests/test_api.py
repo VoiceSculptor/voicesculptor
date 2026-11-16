@@ -1,5 +1,8 @@
 """Tests for the emotion service HTTP API."""
 
+# pytest 的 fixture 注入会与模块级同名函数重名，这里按 pytest 惯例放行。
+# pylint: disable=redefined-outer-name
+
 import io
 import math
 
