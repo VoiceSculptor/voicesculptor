@@ -9,3 +9,4 @@ __pycache__/
 *.bak
 *.bak2
 /demo/out/
+.dsh-vision-router/
