@@ -1,0 +1,25 @@
+[project]
+name = "voicesculptor-emotion"
+version = "0.1.0"
+description = "声刻 Studio 情绪识别服务（emotion2vec_plus_large，端口 50001）"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "funasr>=1.2.0,<2",
+    "modelscope>=1.20.0",
+    "fastapi>=0.163.0",
+    "python-multipart>=0.0.33",
+    "uvicorn[standard]>=0.54.0",
+    "soundfile>=0.14.0",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
+]
+
+# 与 app/引擎共用 cu128 轮子，uv 缓存可复用
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }

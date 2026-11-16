@@ -262,7 +262,7 @@ def seed_defaults():
         sf.write(os.path.join(d, 'ref.wav'), preprocess_ref(w, s), s)
         meta = dict(voice_id=vid, name=name, prompt=prompt, emoji='★',
                     created=time.strftime('%Y-%m-%d %H:%M:%S'), source='seed',
-                    emotion=name, group='roxy')
+                    emotion=name, group='roxy', preproc=1)
         with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
 
@@ -320,8 +320,18 @@ EMO_CODE = {'撒娇': 'coq', '开心': 'hap', '难过': 'sad', '生气': 'ang', 
 #   cross_lingual 无转录时用：只用参考音，不需要 prompt_text
 #   instruct2     指令控制情绪（LLM 端不用参考语音 token，音色较弱）
 #   hybrid        实验：把情绪指令放进 zero_shot 的系统提示，保留参考语音 token
+#   split         实验(P2)：LLM 端用情绪参考 emo_ref(+emo_prompt)，flow 端用音色参考 ref_path
 # ------------------------------------------------------------
-def synth_once(kind, ref_path, prompt, text, instruct, speed=1.0):
+def synth_once(kind, ref_path, prompt, text, instruct, speed=1.0, emo_ref=None, emo_prompt=''):
+    if kind == 'split':
+        with open(emo_ref, 'rb') as fe, open(ref_path, 'rb') as fs:
+            files = {'emo_prompt_wav': ('e.wav', fe.read(), 'application/octet-stream'),
+                     'spk_prompt_wav': ('s.wav', fs.read(), 'application/octet-stream')}
+        data = {'tts_text': text, 'speed': str(speed),
+                'emo_prompt_text': 'You are a helpful assistant.<|endofprompt|>' + emo_prompt}
+        r = HTTP.post(COSYVOICE + '/inference_split_prompt', data=data, files=files, timeout=300)
+        r.raise_for_status()
+        return r.content
     if kind == 'zero_shot':
         return _zero_shot_cached(_spk_id(ref_path), ref_path,
                                  'You are a helpful assistant.<|endofprompt|>' + prompt, text, speed)
@@ -430,7 +440,13 @@ def health():
         engines['cosyvoice'] = False
     # 评测模型是本应用的硬依赖，单独上报，前端可直接看出模型目录是否正确
     engines['model'] = os.path.isfile(os.path.join(MODEL_DIR, 'campplus.onnx'))
-    return {'ok': all(engines.values()), 'engines': engines, 'voices': len(list_voices())}
+    # 情绪服务是可选组件：单独上报，不参与 ok 判定
+    try:
+        emo = HTTP.get(EMO_SVC + '/health', timeout=2).ok
+    except Exception:
+        emo = False
+    return {'ok': all(engines.values()), 'engines': engines, 'emotion': emo,
+            'voices': len(list_voices())}
 
 
 # --------------------------------------------------------------------
@@ -481,7 +497,7 @@ async def create_voice(name: str = Form(...), prompt: str = Form(''),
         sf.write(os.path.join(d, 'ref.wav'), wav, sr)
         meta = dict(voice_id=vid, name=name, prompt=prompt, emoji=emoji or '★',
                     created=time.strftime('%Y-%m-%d %H:%M:%S'), source='upload',
-                    emotion=emotion, group=group)
+                    emotion=emotion, group=group, preproc=1)
         with open(os.path.join(d, 'meta.json'), 'w', encoding='utf-8') as f:
             json.dump(meta, f, ensure_ascii=False, indent=2)
     except Exception:
@@ -514,7 +530,8 @@ def delete_voice(vid: str):
 @app.post('/api/tts')
 def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('平静'),
         mode: str = Form('auto'), speed: float = Form(1.0), quality: str = Form('balanced'),
-        best_n: int = Form(2), verify: bool = Form(True), instruct_text: str = Form('')):
+        best_n: int = Form(2), verify: bool = Form(True), instruct_text: str = Form(''),
+        emo_voice_id: str = Form('')):
     # 1) 定位音色：拿到参考音频与转录文本
     meta, ref = voice_paths(voice_id)
     if not text.strip():
@@ -522,8 +539,8 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     # 评测模型缺失时尽早失败，避免先等一次完整合成
     campplus()
     # 参数白名单：非法值早点 422，别等合成完才发现
-    if mode not in ('auto', 'zero_shot', 'instruct2', 'hybrid'):
-        raise HTTPException(422, 'mode 只能是 auto/zero_shot/instruct2/hybrid')
+    if mode not in ('auto', 'zero_shot', 'instruct2', 'hybrid', 'split'):
+        raise HTTPException(422, 'mode 只能是 auto/zero_shot/instruct2/hybrid/split')
     if quality not in ('balanced', 'best'):
         raise HTTPException(422, 'quality 只能是 balanced/best')
     # 语速只接受 0.5~2.0，防止引擎收到离谱的值
@@ -546,6 +563,14 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
                 kind = 'instruct2'
     else:
         kind = mode
+    emo_ref, emo_prompt = None, ''
+    if kind == 'split':
+        if not emo_voice_id:
+            raise HTTPException(422, 'split 模式需要 emo_voice_id（情绪参考音色）')
+        emo_meta, emo_ref = voice_paths(emo_voice_id)
+        emo_prompt = (emo_meta.get('prompt') or '').strip()
+        if not emo_prompt:
+            raise HTTPException(422, '情绪参考音色缺少转录文本，split 模式不可用')
     prompt = (ref_meta.get('prompt') or '').strip()
     emotion_prompt = instruct_text or EMOTION_INSTRUCT.get(emotion)
     instruct = emotion_prompt if kind in ('instruct2', 'hybrid') else None
@@ -557,7 +582,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         kind = 'cross_lingual'
 
     def _synth(k, instr):
-        return synth_once(k, ref_path, prompt, text, instr, speed)
+        return synth_once(k, ref_path, prompt, text, instr, speed, emo_ref=emo_ref, emo_prompt=emo_prompt)
 
     # 3) 第一次合成（失败直接 503，让前端提示引擎不可用）
     t0 = time.time()
@@ -654,7 +679,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
     wav = wrap_wav(best_pcm, 24000)
     duration = len(best_pcm) / 2 / 24000
     # 7) 可选：让情绪服务判断实际情绪（多候选时命中的候选已带上 det，避免重复调用）
-    detected = best.get('det') if best.get('det') is not None else (detect_emotion(wav) if verify else None)
+    detected = best['det'] if (verify and len(scored) > 1) else (detect_emotion(wav) if verify else None)
 
     return JSONResponse({
         'audio_base64': base64.b64encode(wav).decode('ascii'),
@@ -664,6 +689,7 @@ def tts(voice_id: str = Form(...), text: str = Form(...), emotion: str = Form('�
         'engine': 'cosyvoice',
         'mode': kind,
         'ref_voice': ref_meta['voice_id'],
+        'emo_voice': emo_voice_id if kind == 'split' else None,
         'emotion_target': emotion,
         'emotion_detected': detected,
         'candidates': n,

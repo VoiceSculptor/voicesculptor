@@ -87,6 +87,12 @@ pause & exit /b 1
 
 :engine_ready
 echo [1/3] 引擎已在运行（端口 %EPORT%）
+rem 情绪服务（50001）为可选组件：只启动、不等待；设置 VS_NO_EMOTION=1 可跳过
+netstat -ano | findstr ":50001 " | findstr LISTENING >nul
+if errorlevel 1 if not defined VS_NO_EMOTION (
+  echo       启动情绪服务（端口 50001，可选；首次需下载模型）...
+  start "声刻-情绪" /min "%ROOT%_run-emotion.cmd"
+)
 
 netstat -ano | findstr ":%PORT% " | findstr LISTENING >nul
 if not errorlevel 1 goto app_ready

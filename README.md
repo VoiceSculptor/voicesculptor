@@ -38,11 +38,21 @@ engine/CosyVoice/pretrained_models/Fun-CosyVoice3-0.5B/
 - **zero_shot**：只复刻参考音频的音色与语气，emotion 参数不生效。
 - **instruct2**：按情绪指令合成，情绪更明显，但音色相似度可能略降。
 
+## 情绪识别服务（可选，端口 50001）
+
+`emotion/` 是独立的情绪识别服务（emotion2vec_plus_large，FunASR，默认 CPU 推理），`启动-声刻.cmd` 会自动拉起它，日志写在 `logs\emotion.log`。首次启动要下载模型到 ModelScope 缓存（约 1GB 以上）。服务没起来时 Studio 照常合成，只是不显示"实际情绪"，best 模式也不做情绪择优。
+
+- 用 GPU：启动前设置 `EMOTION_DEVICE=cuda:0`
+- 不启动它：设置 `VS_NO_EMOTION=1`
+- 能识别：生气 / 开心 / 平静 / 难过 / 惊讶（"撒娇"没有对应类别）
+
 ## 目录
 
 ```
 app/                Studio 后端 + 前端
 engine/CosyVoice/   引擎（git submodule，独立仓库）
+emotion/            情绪识别服务（50001，可选）
+emotion/            情绪识别服务（50001，可选）
 runtime/roxy-*/     内置情绪参考音频
 logs/               运行日志
 ```
