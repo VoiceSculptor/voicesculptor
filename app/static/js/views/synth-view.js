@@ -31,7 +31,7 @@ export function createSynthView({store, toast, log, onAnalyze}) {
     class: 'vs-textarea',
     id: 'synth-text',
     rows: 5,
-    maxlength: 2000,
+    maxlength: 500,
     placeholder: '输入要合成的内容，建议 1–3 句。',
   });
   textarea.value = state.synth.text;
@@ -187,9 +187,20 @@ export function createSynthView({store, toast, log, onAnalyze}) {
   let renderedResult = null;
   let busy = false;
 
+  /**
+   * Text limit announced by the backend, with a safe fallback.
+   * @param {Object} snapshot Store state.
+   * @returns {number} Maximum characters.
+   */
+  const textLimit = (snapshot) => {
+    const health = snapshot && snapshot.health;
+    const limit = health ? Number(health.max_text_chars) : NaN;
+    return Number.isFinite(limit) && limit > 0 ? limit : 500;
+  };
+
   const updateCounter = () => {
     const length = textarea.value.length;
-    setText(counter, `${length} / 2000 字`);
+    setText(counter, `${length} / ${textLimit(store.getState())} 字`);
   };
   updateCounter();
 
@@ -484,6 +495,12 @@ export function createSynthView({store, toast, log, onAnalyze}) {
         resultCard.clear();
         setHidden(empty, false);
       }
+    }
+
+    const limit = textLimit(snapshot);
+    if (textarea.maxLength !== limit) {
+      textarea.maxLength = limit;
+      updateCounter();
     }
 
     syncAvailability(snapshot);

@@ -24,4 +24,5 @@ def health(request: Request) -> dict:
         'voices': len(ctx.store.list_voices()),
         'broken_voices': ctx.store.broken_voices(),
         'capabilities': report.capabilities,
+        'max_text_chars': ctx.settings.max_text_chars,
     }

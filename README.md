@@ -81,6 +81,60 @@ set VS_MODEL_SOURCE=huggingface
 
 想再快一点可设置 `COSYVOICE_FP16=1` 后启动引擎（fp16 推理，仅 CUDA 生效，显存占用更低；个别显卡音质可能有轻微波动，默认关闭）。
 
+## 使用方法
+
+打开 http://127.0.0.1:8091 后，左侧是「合成 / 情绪识别 / 素材体检 / 环境检测」四个页面加音色库，右上角芯片显示整体健康度（绿=全部正常；黄/红=有 FAIL 或 WARN，点一下跳到环境检测）。
+
+### 合成语音
+
+1. 在「音色」下拉里选参考音色，或在左侧列表点选（两处同步）。
+2. 输入文本，建议 1–3 句；上限默认 500 字（可用 `VS_MAX_TEXT_CHARS` 调整，页面字数提示会跟着变）。
+3. 点情绪芯片：撒娇 / 开心 / 难过 / 生气 / 平静 / 惊讶。
+4. 模式一般保持「自动」；「指令」情绪更明显但音色相似度可能略降，「零样本」只复刻音色、不吃情绪参数。
+5. 质量选「均衡」；选「最佳」后可设候选数量 2–4，打开「情绪校验」会综合情绪一致度、响度、相似度排序。
+6. 点「生成语音」或按 Ctrl+Enter。结果卡可试听、下载 wav，并显示相似度、时长、延迟和实际识别到的情绪。
+
+### 新建音色
+
+左侧「新建音色」→ 上传 0.5–30 秒干净人声（wav / mp3 / flac / ogg，≤ 20 MB）→ 填名称（≤ 32 字）、情绪、分组、参考文本 → 保存。参考音频会自动去静音并归一化；太短、太长或太吵会给出提示。保存后立即出现在左侧音色库。
+
+### 情绪识别
+
+「情绪识别」页上传一段音频，返回模型判定的主要情绪和各情绪分数。合成页打开「情绪校验」时，后端对你的参考音频做的就是同一件事。
+
+### 素材体检
+
+「素材体检」页填写音色库目录（默认 `app\voices`），生成 markdown 报告到 `logs\audit-report.md`，列出每个音色的时长、响度、可读性等问题。
+
+### 环境检测
+
+12 项检查与命令行走同一套逻辑，失败项会给处理建议；右上角能力开关决定哪些按钮可用。详见下面的「环境检测」。
+
+## 常见故障排除
+
+先看日志：`logs\app.log`（Studio）、`logs\engine.log`（CosyVoice 引擎）、`logs\emotion.log`（情绪服务）、`logs\launcher.log`（启动器）。`诊断.cmd` 收集环境信息，`收集日志.cmd` 打包日志。
+
+| 症状 | 可能原因 | 处理 |
+|---|---|---|
+| 双击启动器窗口一闪而过 | 没装 uv、不在仓库根目录、或路径含特殊字符 | 在仓库根目录打开 cmd，运行 `启动-声刻.cmd` 看报错；`winget install astral-sh.uv` |
+| 浏览器打不开 8091 | 应用还没起完，或端口被占 | 看 `logs\app.log` 是否 `Studio app is listening`；`netstat -ano \| findstr :8091` 找占用进程 |
+| 健康芯片红，`engines.cosyvoice=false` | 引擎没起 / 加载中 / 崩溃 | 看 `logs\engine.log`；等模型加载（首次 20 秒以上）；确认 50000 端口 |
+| 合成返回 503「引擎未就绪」 | 引擎还在加载模型 | 等 `/health` 里 `sample_rate` 出现后重试 |
+| 合成失败、日志里 CUDA out of memory | 显存不足或候选数太大 | 降低候选数量、关掉其他占显存的程序；可设 `COSYVOICE_FP16=1` 后重启引擎 |
+| 生成很慢（几十秒一条） | torch 没跑在 CUDA 上 | `python -m voicesculptor.envcheck` 看 `torch_cuda` 是否 OK；更新驱动到 ≥ 570 |
+| 上传参考音频报「无法识别的音频文件」 | 格式不支持（m4a/aac 等）或文件损坏 | 先转成 wav/mp3/flac/ogg；确认 20 MB 以内 |
+| 上传报 422「有效语音过短」 | 参考音频里几乎都是静音或太短 | 换 1–10 秒、人声清晰、尽量无背景音乐的片段 |
+| `broken_voices` FAIL | 音色目录缺 `ref.wav` 或 `meta.json` | `python -m voicesculptor.envcheck --fix`，损坏目录会被移到 `voices\.broken\` |
+| 情绪识别一直 WARN | 50001 没起，或首次在下载模型（约 1 GB） | 看 `logs\emotion.log`；耐心等首次下载；需要 GPU 可设 `EMOTION_DEVICE=cuda:0` |
+| 合成能用但「实际情绪」为空 | 情绪服务不可用，属预期降级 | 启动 `启动-声刻.cmd` 时不要设 `VS_NO_EMOTION=1`；best 择优会自动跳过情绪项 |
+| `uv sync` 失败或卡住 | 网络、代理、或缓存损坏 | 设 `NO_PROXY=127.0.0.1,localhost`；必要时 `uv cache clean` 后重试；国内可配 uv 镜像 |
+| 模型下载报 403 / 卡在 `.part` | 下载源被限流或中断 | 换源 `set VS_MODEL_SOURCE=huggingface`（或 `hf-mirror`）；删掉对应 `.part` 重试 |
+| 启动报 `pyworld` 构建失败 | 用了 Python 3.12+ | 必须 Python 3.11：`uv python install 3.11`，删掉 `.venv` 让它重建 |
+| 跑测试报 `No module named pytest` | 启动器的 `uv sync` 把 test 组依赖清掉了 | `cd app && uv sync --group test`（emotion 目录同样处理） |
+| 日志里中文乱码 | 用记事本按 ANSI 打开了 UTF-8 日志 | 用 VS Code / Notepad++ 以 UTF-8 打开；`.cmd` 保持 ASCII+CRLF，不要塞中文 |
+
+还查不出来时，运行 `诊断.cmd` 和 `python -m voicesculptor.envcheck --json`，把输出连同 `logs\` 一起带上再问。
+
 ## 开发
 
 两个应用各自是一个 uv 项目，测试依赖放在 `test` 组里：

@@ -35,6 +35,7 @@ def test_health_has_capabilities():
         assert isinstance(caps[key], bool)
     assert isinstance(caps['formats'], list)
     assert 'wav' in caps['formats']
+    assert body['max_text_chars'] > 0
 
 
 def test_env_returns_twelve_checks():
